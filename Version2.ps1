@@ -1,10 +1,10 @@
 # -----------------------------------------------------------------------------
 # PowerChart Designer: Editor de Dados
-# Versão: 8.0 - Arquitetura Desacoplada (Editor + Relatório HTML)
-# Autor: Seu Nome/Empresa
-# Descrição: Esta ferramenta é responsável por carregar, validar e editar
-#            dados de arquivos CSV. Ela gera um arquivo HTML separado para
-#            a visualização dos gráficos no navegador padrão do usuário.
+# Versão: 9.0 - Relatório Interativo Avançado
+# Autor:Jefferson/Empresa
+# Descrição: Esta versão gera um relatório HTML com seletor de tipo de gráfico,
+#            controle de rótulos de dados e visibilidade das linhas de grade,
+#            oferecendo uma experiência de usuário muito mais rica.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -109,7 +109,6 @@ Function Generate-HtmlReport {
 Function Get-HtmlTemplate {
     param($JsonData, $JsonColumnNames)
 
-    # Este é o conteúdo do arquivo PowerChart_Relatorio.html
     return @"
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -119,67 +118,169 @@ Function Get-HtmlTemplate {
     <title>PowerChart - Relatório Dinâmico</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); padding: 1.5rem; }
         .kpi-value { font-size: 2rem; font-weight: 900; color: #1e293b; }
         .kpi-label { font-size: 0.875rem; color: #64748b; margin-top: 0.25rem; }
-        .chart-container { position: relative; width: 100%; height: 380px; }
+        .chart-container { position: relative; width: 100%; height: 450px; }
+        .chart-selector label { border: 2px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; cursor: pointer; transition: all 0.2s ease-in-out; text-align: center; }
+        .chart-selector label:hover { border-color: #9ca3af; }
+        .chart-selector input:checked + label { border-color: #3b82f6; background-color: #eff6ff; box-shadow: 0 0 0 2px #3b82f6; }
+        .chart-selector input { display: none; }
     </style>
 </head>
 <body class="text-gray-900">
     <header class="bg-[#0f172a] text-white text-center py-12 px-4">
         <h1 class="text-4xl md:text-5xl font-black tracking-tight">Relatório Dinâmico Interativo</h1>
-        <p class="mt-4 text-lg text-blue-200 max-w-3xl mx-auto">Dados gerados e processados via PowerChart Editor.</p>
+        <p class="mt-4 text-lg text-blue-200 max-w-3xl mx-auto">Dados processados via PowerChart Editor.</p>
     </header>
     <main class="container mx-auto p-4 md:p-8 -mt-10">
         <section id="controls" class="card mb-6">
-            <h2 class="text-xl font-bold text-[#1e293b] mb-4">Configurações dos Gráficos</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 items-end">
-                <div><label for="x-axis">Eixo X:</label><select id="x-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
-                <div><label for="y1-axis">Série Y1:</label><select id="y1-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
-                <div><label for="y1-color">Cor Y1:</label><input type="color" id="y1-color" value="#3b82f6" class="w-full h-10 mt-1"></div>
-                <div><label for="y2-axis">Série Y2:</label><select id="y2-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
-                <div><label for="y2-color">Cor Y2:</label><input type="color" id="y2-color" value="#ef4444" class="w-full h-10 mt-1"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div>
+                    <h2 class="text-xl font-bold text-[#1e293b] mb-4">1. Seleção de Dados</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                        <div><label for="x-axis">Eixo X:</label><select id="x-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                        <div><label for="y1-axis">Série Y1:</label><select id="y1-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                        <div><label for="y1-color">Cor Y1:</label><input type="color" id="y1-color" value="#3b82f6" class="w-full h-10 mt-1"></div>
+                        <div><label for="y2-axis">Série Y2:</label><select id="y2-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                        <div><label for="y2-color">Cor Y2:</label><input type="color" id="y2-color" value="#ef4444" class="w-full h-10 mt-1"></div>
+                    </div>
+                </div>
+                 <div>
+                    <h2 class="text-xl font-bold text-[#1e293b] mb-4">2. Opções de Visualização</h2>
+                    <div class="flex items-center space-x-6 mb-4">
+                        <div class="flex items-center"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-labels" class="ml-2 block text-sm text-gray-900">Exibir Rótulos de Dados</label></div>
+                        <div class="flex items-center"><input id="show-grid" type="checkbox" checked class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-grid" class="ml-2 block text-sm text-gray-900">Exibir Linhas de Grade</label></div>
+                    </div>
+                    <div class="mt-6"><button id="update-charts-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg">Atualizar Gráfico</button></div>
+                </div>
             </div>
-            <div class="mt-4"><button id="update-charts-btn" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg">Atualizar Gráficos</button></div>
         </section>
+
+        <section class="card mb-6">
+            <h2 class="text-xl font-bold text-[#1e293b] mb-4">3. Escolha o Tipo de Gráfico</h2>
+            <div class="chart-selector grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div><input type="radio" name="chart-type" value="combo" id="type-combo" checked><label for="type-combo" class="flex flex-col items-center justify-center h-full"><svg class="w-12 h-12 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/><path d="M3 12l5-4 5 6 5-4"/></svg><span class="font-semibold">Combo</span></label></div>
+                <div><input type="radio" name="chart-type" value="bar" id="type-bar"><label for="type-bar" class="flex flex-col items-center justify-center h-full"><svg class="w-12 h-12 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="font-semibold">Barras</span></label></div>
+                <div><input type="radio" name="chart-type" value="line" id="type-line"><label for="type-line" class="flex flex-col items-center justify-center h-full"><svg class="w-12 h-12 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M3 17l5-4 5 6 5-4 4 2"/></svg><span class="font-semibold">Linha</span></label></div>
+                <div><input type="radio" name="chart-type" value="stacked" id="type-stacked"><label for="type-stacked" class="flex flex-col items-center justify-center h-full"><svg class="w-12 h-12 mb-2" viewBox="0 0 24 24" fill="#3b82f6" stroke="#3b82f6" stroke-width="1"><rect x="5" y="12" width="4" height="6"/><rect x="10" y="8" width="4" height="10"/><rect x="15" y="4" width="4" height="14"/><path d="M5 12V9h4v3m1-4V4h4v4m1-4V2h4v2" fill="#ef4444"/></svg><span class="font-semibold">Empilhado</span></label></div>
+            </div>
+        </section>
+
         <section id="kpis" class="mb-6"><div id="kpi-grid" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div></section>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-            <section class="card lg:col-span-2"><h3 class="text-lg font-bold">Gráfico Combo (Barra + Linha)</h3><div class="chart-container"><canvas id="comboChart"></canvas></div></section>
-            <section class="card"><h3 class="text-lg font-bold">Comparativo de Barras</h3><div class="chart-container"><canvas id="barChart"></canvas></div></section>
-            <section class="card"><h3 class="text-lg font-bold">Evolução em Linha</h3><div class="chart-container"><canvas id="lineChart"></canvas></div></section>
-            <section class="card lg:col-span-2"><h3 class="text-lg font-bold">Gráfico de Barras Empilhadas</h3><div class="chart-container"><canvas id="stackedBarChart"></canvas></div></section>
-        </div>
+        
+        <section class="card">
+            <h3 id="chart-title" class="text-xl font-bold text-[#1e293b] mb-4"></h3>
+            <div class="chart-container"><canvas id="mainChart"></canvas></div>
+        </section>
     </main>
     <script>
         var RAW_DATA = $JsonData;
         var COLUMN_NAMES = $JsonColumnNames;
-        // Restante do JS é idêntico à versão 7.0 e funcionará perfeitamente no navegador.
-        var myCharts = [];
+        var chartInstance;
+
+        Chart.register(ChartDataLabels);
+
         function parseNumericValue(v){if(typeof v==='number'){return v}if(typeof v!=='string'){return 0}var c=v.replace(/[^0-9,-]/g,'').replace(',','.');var p=parseFloat(c);return isNaN(p)?0:p}
         function findDefaultAxes(){var d={xAxis:null,y1Axis:null,y2Axis:null},n=[],t=[];if(!RAW_DATA||RAW_DATA.length===0){return d}var f=RAW_DATA[0];for(var i=0;i<COLUMN_NAMES.length;i++){var o=COLUMN_NAMES[i],a=f[o];if(a===null||a===undefined)continue;var l=parseFloat(String(a).replace(',','.'));!isNaN(l)&&String(a).trim()!==''?n.push(o):t.push(o)}d.xAxis=t[0]||COLUMN_NAMES[0]||null;d.y1Axis=n[0]||(COLUMN_NAMES.length>1?COLUMN_NAMES[1]:null);d.y2Axis=n[1]||(COLUMN_NAMES.length>2?COLUMN_NAMES[2]:null);return d}
         function populateControls(d){var n=['x-axis','y1-axis','y2-axis'];n.forEach(function(o){var a=document.getElementById(o);a.innerHTML=o==='y2-axis'?'<option value="Nenhum">Nenhum</option>':'';COLUMN_NAMES.forEach(function(n){a.innerHTML+='<option value="'+n+'">'+n+'</option>'})});document.getElementById('x-axis').value=d.xAxis||'';document.getElementById('y1-axis').value=d.y1Axis||'';document.getElementById('y2-axis').value=d.y2Axis||'Nenhum'}
-        function renderCharts(){myCharts.forEach(function(d){d.destroy()});myCharts=[];var n=document.getElementById('x-axis').value,o=document.getElementById('y1-axis').value,a=document.getElementById('y2-axis').value,l=document.getElementById('y1-color').value,r=document.getElementById('y2-color').value,t=a!=='Nenhum';if(!n||!o){return}var i=RAW_DATA.map(function(d){return d[n]}),e=RAW_DATA.map(function(d){return parseNumericValue(d[o])}),s=t?RAW_DATA.map(function(d){return parseNumericValue(d[a])}):[];updateKPIs(e,s,o,a,i,t);myCharts.push(createComboChart(i,e,s,o,a,l,r,t));myCharts.push(createBarChart(i,e,o,l));myCharts.push(createLineChart(i,e,o,l));myCharts.push(createStackedBarChart(i,e,s,o,a,l,r,t))}
+        
+        function renderChart() {
+            if (chartInstance) { chartInstance.destroy(); }
+            
+            var chartType = document.querySelector('input[name="chart-type"]:checked').value;
+            var showLabels = document.getElementById('show-labels').checked;
+            var showGrid = document.getElementById('show-grid').checked;
+
+            var xCol = document.getElementById('x-axis').value, y1Col = document.getElementById('y1-axis').value, y2Col = document.getElementById('y2-axis').value;
+            var y1Color = document.getElementById('y1-color').value, y2Color = document.getElementById('y2-color').value;
+            var isY2Enabled = y2Col !== 'Nenhum';
+
+            if (!xCol || !y1Col) { return; }
+
+            var labels = RAW_DATA.map(function(d){return d[xCol]});
+            var dataY1 = RAW_DATA.map(function(d){return parseNumericValue(d[y1Col])});
+            var dataY2 = isY2Enabled ? RAW_DATA.map(function(d){return parseNumericValue(d[y2Col])}) : [];
+
+            updateKPIs(dataY1, dataY2, y1Col, y2Col, labels, isY2Enabled);
+
+            var ctx = document.getElementById('mainChart').getContext('2d');
+            var chartTitle = document.querySelector('label[for="type-' + chartType + '"]').textContent;
+            document.getElementById('chart-title').textContent = 'Gráfico de ' + chartTitle;
+            
+            var datasets, options;
+            var baseOptions = {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    datalabels: {
+                        display: showLabels,
+                        anchor: 'end',
+                        align: 'top',
+                        formatter: function(value) { return value.toLocaleString('pt-BR'); },
+                        font: { weight: 'bold' }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: showGrid } },
+                    y: { grid: { display: showGrid }, beginAtZero: true }
+                }
+            };
+
+            switch(chartType) {
+                case 'combo':
+                    datasets = [{ type: 'bar', label: y1Col, data: dataY1, backgroundColor: y1Color + 'B3', yAxisID: 'y' }];
+                    if (isY2Enabled) { datasets.push({ type: 'line', label: y2Col, data: dataY2, borderColor: y2Color, tension: .4, yAxisID: 'y1' }); }
+                    options = JSON.parse(JSON.stringify(baseOptions)); // Deep copy
+                    options.scales.y1 = { display: isY2Enabled, position: 'right', grid: { drawOnChartArea: false }, beginAtZero: true };
+                    chartInstance = new Chart(ctx, { data: { labels: labels, datasets: datasets }, options: options });
+                    break;
+                case 'bar':
+                    datasets = [{ label: y1Col, data: dataY1, backgroundColor: y1Color }];
+                    chartInstance = new Chart(ctx, { type: 'bar', data: { labels: labels, datasets: datasets }, options: baseOptions });
+                    break;
+                case 'line':
+                    datasets = [{ label: y1Col, data: dataY1, borderColor: y1Color, backgroundColor: y1Color + '33', fill: true, tension: .4 }];
+                    chartInstance = new Chart(ctx, { type: 'line', data: { labels: labels, datasets: datasets }, options: baseOptions });
+                    break;
+                case 'stacked':
+                    datasets = [{ label: y1Col, data: dataY1, backgroundColor: y1Color }];
+                    if (isY2Enabled) { datasets.push({ label: y2Col, data: dataY2, backgroundColor: y2Color }); }
+                    options = JSON.parse(JSON.stringify(baseOptions)); // Deep copy
+                    options.scales.x.stacked = true;
+                    options.scales.y.stacked = true;
+                    chartInstance = new Chart(ctx, { type: 'bar', data: { labels: labels, datasets: datasets }, options: options });
+                    break;
+            }
+        }
+        
         function updateKPIs(d,n,o,a,l,r){var t=d.reduce(function(d,n){return d+n},0),i=r?n.reduce(function(d,n){return d+n},0):0,e=-Infinity,s=-1;for(var u=0;u<d.length;u++){if(d[u]>e){e=d[u];s=u}}var c=l[s],h=document.getElementById('kpi-grid');h.innerHTML='<div class="card"><div class="kpi-value">'+t.toLocaleString('pt-BR')+'</div><div class="kpi-label">Total de '+o+'</div></div>'+'<div class="card"><div class="kpi-value">'+(r?i.toLocaleString('pt-BR'):'N/A')+'</div><div class="kpi-label">Total de '+(r?a:'-')+'</div></div>'+'<div class="card"><div class="kpi-value">'+c+'</div><div class="kpi-label">Ponto de Maior '+o+'</div></div>'}
-        var defaultChartOptions={responsive:!0,maintainAspectRatio:!1,plugins:{legend:{position:'bottom'}}};
-        function createComboChart(d,n,o,a,l,r,t,i){var e=document.getElementById('comboChart').getContext('2d'),s=[{type:'bar',label:a,data:n,backgroundColor:r+'B3',yAxisID:'y'}];if(i){s.push({type:'line',label:l,data:o,borderColor:t,tension:.4,yAxisID:'y1'})}var u={responsive:!0,maintainAspectRatio:!1,plugins:{legend:{position:'bottom'}},scales:{y:{position:'left'},y1:{display:i,position:'right',grid:{drawOnChartArea:!1}}}};return new Chart(e,{data:{labels:d,datasets:s},options:u})}
-        function createBarChart(d,n,o,a){return new Chart(document.getElementById('barChart').getContext('2d'),{type:'bar',data:{labels:d,datasets:[{label:o,data:n,backgroundColor:a}]},options:defaultChartOptions})}
-        function createLineChart(d,n,o,a){return new Chart(document.getElementById('lineChart').getContext('2d'),{type:'line',data:{labels:d,datasets:[{label:o,data:n,borderColor:a,backgroundColor:a+'33',fill:!0,tension:.4}]},options:defaultChartOptions})}
-        function createStackedBarChart(d,n,o,a,l,r,t,i){var e=document.getElementById('stackedBarChart').getContext('2d'),s=[{label:a,data:n,backgroundColor:r}];if(i){s.push({label:l,data:o,backgroundColor:t})}var u={responsive:!0,maintainAspectRatio:!1,plugins:{legend:{position:'bottom'}},scales:{x:{stacked:!0},y:{stacked:!0}}};return new Chart(e,{type:'bar',data:{labels:d,datasets:s},options:u})}
-        document.addEventListener('DOMContentLoaded',function(){try{var d=findDefaultAxes();populateControls(d);renderCharts();document.getElementById('update-charts-btn').addEventListener('click',renderCharts)}catch(n){}});
+        
+        document.addEventListener('DOMContentLoaded',function(){
+            try {
+                var d=findDefaultAxes();
+                populateControls(d);
+                renderChart();
+                document.getElementById('update-charts-btn').addEventListener('click', renderChart);
+                document.querySelectorAll('input[name="chart-type"], #show-labels, #show-grid').forEach(function(el) {
+                    el.addEventListener('change', renderChart);
+                });
+            } catch(e) {}
+        });
     </script>
 </body>
 </html>
 "@
 }
 
-
 # --- 3. Construção da Interface Gráfica (Windows Forms) ---
 
 $Form = New-Object System.Windows.Forms.Form
-$Form.Text = "PowerChart Editor 8.0"
+$Form.Text = "PowerChart Editor 9.0"
 $Form.Width = 1024
 $Form.Height = 768
 $Form.StartPosition = "CenterScreen"
@@ -243,3 +344,4 @@ $ButtonGenerateHtml.Add_Click({
 
 # --- 5. Exibir a Janela ---
 $Form.ShowDialog() | Out-Null
+
