@@ -1,41 +1,30 @@
 # -----------------------------------------------------------------------------
-# PowerChart Designer: Gerador de Gráfico Combo Interativo (Puro .NET)
-# Funções: Leitura CSV robusta, Edição de Dados em tempo real, Gráfico Combo Dinâmico,
-# Seleção de Tipo/Cor, Eixo Secundário Opcional e Salvamento de Imagem/CSV.
+# PowerChart Designer: Editor de Dados
+# Versão: 8.0 - Arquitetura Desacoplada (Editor + Relatório HTML)
+# Autor: Seu Nome/Empresa
+# Descrição: Esta ferramenta é responsável por carregar, validar e editar
+#            dados de arquivos CSV. Ela gera um arquivo HTML separado para
+#            a visualização dos gráficos no navegador padrão do usuário.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
 try {
-    # Assemblies para o gráfico, janela e cores
-    Add-Type -AssemblyName System.Windows.Forms.DataVisualization
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 }
 catch {
-    Write-Error "Não foi possível carregar as assemblies necessárias. Verifique a instalação do .NET Framework/Core."
+    Write-Error "Não foi possível carregar as assemblies necessárias."
     exit 1
 }
 
-# --- 2. Preparação dos Dados (Global State) ---
-$script:LoadedData = @()       # Armazena os dados importados/editados
-$script:ColumnNames = @()     # Armazena os nomes das colunas disponíveis
-$script:ChartInstance = $null  # Armazena o objeto Chart para salvamento
+# --- 2. Funções Principais ---
 
-# Tipos de gráfico disponíveis no ComboBox
-$ChartTypes = [System.Enum]::GetNames([System.Windows.Forms.DataVisualization.Charting.SeriesChartType]) | Where-Object {
-    $_ -notin @("PointAndFigure", "Stock", "Candlestick", "ErrorBar")
-}
-
-# --- 3. Funções de Utilitário e Sincronização ---
-
-# Função para Carregar CSV (com identificação automática de delimitador)
+# Função para carregar dados do CSV para a grade
 Function Load-CSVData {
     param(
-        [Parameter(Mandatory=$true)]$TextBoxFilePath,
         [Parameter(Mandatory=$true)]$DataGridView,
-        [Parameter(Mandatory=$true)]$ComboXAxis,
-        [Parameter(Mandatory=$true)]$ComboY1Data,
-        [Parameter(Mandatory=$true)]$ComboY2Data
+        [Parameter(Mandatory=$true)]$StatusLabel,
+        [Parameter(Mandatory=$true)]$GenerateButton
     )
 
     $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -44,548 +33,213 @@ Function Load-CSVData {
 
     if ($OpenFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         $FilePath = $OpenFileDialog.FileName
-        $TextBoxFilePath.Text = $FilePath
-        
-        $Data = @()
-        $DelimiterFound = ";" # Tenta ponto e vírgula primeiro
+        $StatusLabel.Text = "Analisando: $(Split-Path $FilePath -Leaf)..."
+        $StatusLabel.Refresh()
 
-        # Tentativa 1: Ponto e Vírgula (Padrão PT-BR)
-        try { $Data = Import-Csv -Path $FilePath -Delimiter ";" -ErrorAction Stop } catch { $Data = @() }
-
-        # Tentativa 2: Vírgula (Padrão US/Internacional)
-        if ($Data.Count -eq 0 -or $Data[0].PSObject.Properties.Name.Count -le 1) {
-            try { 
-                $Data = Import-Csv -Path $FilePath -Delimiter "," -ErrorAction Stop
-                $DelimiterFound = ","
-            } catch { $Data = @() }
+        $Data = $null
+        try {
+            $firstLine = Get-Content -Path $FilePath -TotalCount 1
+            $bestDelimiter = if (($firstLine -split ';').Count -gt ($firstLine -split ',').Count) { ';' } else { ',' }
+            $Data = Import-Csv -Path $FilePath -Delimiter $bestDelimiter
+        }
+        catch {
+            # O erro será tratado abaixo
         }
 
-        if ($Data.Count -gt 0) {
-            $script:LoadedData = $Data
-            $script:ColumnNames = $script:LoadedData[0].PSObject.Properties.Name
-            
-            # Limpar e popular DataGridView
-            $DataGridView.DataSource = $null
-            $DataGridView.DataSource = $script:LoadedData
-            $DataGridView.Refresh()
-
-            # Configurar DataGridView para permitir edição
-            $DataGridView.AllowUserToAddRows = $true
-            $DataGridView.AllowUserToDeleteRows = $true
-
-            # Atualizar ComboBoxes
-            $ComboXAxis.Items.Clear(); $ComboY1Data.Items.Clear(); $ComboY2Data.Items.Clear()
-            $ComboXAxis.Items.AddRange($script:ColumnNames)
-            $ComboY1Data.Items.AddRange($script:ColumnNames)
-            $ComboY2Data.Items.Add("Nenhum") # Opção para desabilitar
-            $ComboY2Data.Items.AddRange($script:ColumnNames)
-            
-            # Tenta pré-selecionar colunas
-            $ComboXAxis.SelectedIndex = 0
-            if ($script:ColumnNames.Count -gt 1) { $ComboY1Data.SelectedIndex = 1 }
-            $ComboY2Data.SelectedItem = "Nenhum" 
-            
-            # Formata colunas numéricas no grid para visualização
-            foreach ($colName in $script:ColumnNames) {
-                if ($DataGridView.Columns[$colName].ValueType -eq [System.Double] -or $DataGridView.Columns[$colName].ValueType -eq [System.Int32]) {
-                    $DataGridView.Columns[$colName].DefaultCellStyle.Format = "N2"
-                }
-            }
-
+        if ($null -ne $Data -and $Data.Count -gt 0) {
+            $DataGridView.DataSource = [System.Collections.ArrayList]$Data
+            $DataGridView.AutoSizeColumnsMode = 'AllCells'
+            $StatusLabel.Text = "Arquivo carregado: $(Split-Path $FilePath -Leaf)"
+            $GenerateButton.Enabled = $true
         } else {
-            [System.Windows.Forms.MessageBox]::Show("Erro: Arquivo CSV vazio ou formato de delimitador inválido.", "Erro de Leitura", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-            $script:LoadedData = @()
-            $script:ColumnNames = @()
+            $DataGridView.DataSource = $null
+            [System.Windows.Forms.MessageBox]::Show("Não foi possível ler os dados do arquivo CSV.", "Erro de Leitura", "OK", "Error")
+            $StatusLabel.Text = "Falha ao carregar arquivo."
+            $GenerateButton.Enabled = $false
         }
     }
 }
 
-# Sincroniza as edições do DataGridView com a variável de dados do gráfico
-Function Sync-DataGridToChart {
+# Função para gerar o relatório HTML e abri-lo
+Function Generate-HtmlReport {
     param(
-        [Parameter(Mandatory=$true)]$DataGridView
+        [Parameter(Mandatory=$true)]$DataGridView,
+        [Parameter(Mandatory=$true)]$StatusLabel
     )
 
-    if ($DataGridView.DataSource) {
-        # Exporta o DataSource (BindingList) de volta para um Array de PSCustomObject
-        # Isso garante que as edições na grade sejam refletidas no $script:LoadedData
-        $NewData = @()
-        foreach ($item in $DataGridView.DataSource) {
-            $NewData += $item
-        }
-        $script:LoadedData = $NewData
-        
-        # Atualiza a lista de nomes de colunas caso o usuário tenha adicionado/removido
-        if ($script:LoadedData.Count -gt 0) {
-            $script:ColumnNames = $script:LoadedData[0].PSObject.Properties.Name
-        }
+    if ($null -eq $DataGridView.DataSource -or $DataGridView.Rows.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("Não há dados carregados para gerar o relatório.", "Aviso", "OK", "Warning")
+        return
     }
-}
 
-# Função para Salvar o Gráfico
-Function Save-ChartImage {
-    param(
-        [Parameter(Mandatory=$true)]$Chart
-    )
-    # [Restante da função Save-ChartImage...]
-    $SaveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
-    $SaveFileDialog.Filter = "PNG Image (*.png)|*.png|JPEG Image (*.jpg)|*.jpg|Bitmap (*.bmp)|*.bmp"
-    $SaveFileDialog.Title = "Salvar Gráfico como Imagem"
+    $StatusLabel.Text = "Gerando relatório HTML..."
+    $StatusLabel.Refresh()
 
-    if ($SaveFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $FilePath = $SaveFileDialog.FileName
-        $Format = [System.Windows.Forms.DataVisualization.Charting.ChartImageFormat]::Png
-
-        if ($FilePath.EndsWith(".jpg", [System.StringComparison]::OrdinalIgnoreCase) -or $FilePath.EndsWith(".jpeg", [System.StringComparison]::OrdinalIgnoreCase)) {
-            $Format = [System.Windows.Forms.DataVisualization.Charting.ChartImageFormat]::Jpeg
-        } elseif ($FilePath.EndsWith(".bmp", [System.StringComparison]::OrdinalIgnoreCase)) {
-            $Format = [System.Windows.Forms.DataVisualization.Charting.ChartImageFormat]::Bmp
+    # Converte os dados da grade (que podem ter sido editados) para JSON
+    $DataForJson = $DataGridView.DataSource | ForEach-Object {
+        $properties = @{}
+        foreach ($prop in $_.PSObject.Properties) {
+            $properties[$prop.Name] = $prop.Value
         }
-
-        try {
-            $Chart.SaveImage($FilePath, $Format)
-            [System.Windows.Forms.MessageBox]::Show("Gráfico salvo com sucesso em: $FilePath", "Sucesso", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-        } catch {
-            [System.Windows.Forms.MessageBox]::Show("Erro ao salvar o arquivo: $($_.Exception.Message)", "Erro", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-        }
+        New-Object -TypeName PSObject -Property $properties
     }
-}
 
-# Função para Salvar CSV Editado
-Function Save-EditedCSV {
-    param(
-        [Parameter(Mandatory=$true)]$DataGridView
-    )
-    $SaveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
-    $SaveFileDialog.Filter = "CSV (Ponto e Vírgula) (*.csv)|*.csv"
-    $SaveFileDialog.Title = "Salvar Edições do CSV"
+    $JsonData = $DataForJson | ConvertTo-Json -Compress -Depth 5
+    $JsonColumnNames = $DataGridView.Columns.DataPropertyName | ConvertTo-Json -Compress
+
+    # Caminho do arquivo de saída
+    $OutputPath = Join-Path $env:TEMP "PowerChart_Relatorio.html"
+
+    # Gera o conteúdo do HTML
+    $HtmlContent = Get-HtmlTemplate -JsonData $JsonData -JsonColumnNames $JsonColumnNames
     
-    if ($SaveFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $FilePath = $SaveFileDialog.FileName
-        
-        # Sincroniza antes de salvar para garantir que as últimas edições estejam no $script:LoadedData
-        Sync-DataGridToChart -DataGridView $DataGridView
-
-        try {
-            # Exporta usando ponto e vírgula, facilitando a leitura em Excel
-            $script:LoadedData | Export-Csv -Path $FilePath -NoTypeInformation -Delimiter ";" -Encoding UTF8
-            [System.Windows.Forms.MessageBox]::Show("CSV editado salvo com sucesso em: $FilePath", "Sucesso", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
-        } catch {
-            [System.Windows.Forms.MessageBox]::Show("Erro ao salvar o CSV: $($_.Exception.Message)", "Erro", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-        }
+    try {
+        $HtmlContent | Out-File -FilePath $OutputPath -Encoding UTF8
+        # Abre o arquivo no navegador padrão
+        Start-Process $OutputPath
+        $StatusLabel.Text = "Relatório gerado e aberto com sucesso!"
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("Ocorreu um erro ao gerar ou abrir o arquivo HTML: $($_.Exception.Message)", "Erro", "OK", "Error")
+        $StatusLabel.Text = "Falha ao gerar o relatório."
     }
 }
 
-# --- 4. Inicialização da Janela e Controles (Design Moderno) ---
+# Template do HTML (separado para clareza)
+Function Get-HtmlTemplate {
+    param($JsonData, $JsonColumnNames)
+
+    # Este é o conteúdo do arquivo PowerChart_Relatorio.html
+    return @"
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PowerChart - Relatório Dinâmico</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); padding: 1.5rem; }
+        .kpi-value { font-size: 2rem; font-weight: 900; color: #1e293b; }
+        .kpi-label { font-size: 0.875rem; color: #64748b; margin-top: 0.25rem; }
+        .chart-container { position: relative; width: 100%; height: 380px; }
+    </style>
+</head>
+<body class="text-gray-900">
+    <header class="bg-[#0f172a] text-white text-center py-12 px-4">
+        <h1 class="text-4xl md:text-5xl font-black tracking-tight">Relatório Dinâmico Interativo</h1>
+        <p class="mt-4 text-lg text-blue-200 max-w-3xl mx-auto">Dados gerados e processados via PowerChart Editor.</p>
+    </header>
+    <main class="container mx-auto p-4 md:p-8 -mt-10">
+        <section id="controls" class="card mb-6">
+            <h2 class="text-xl font-bold text-[#1e293b] mb-4">Configurações dos Gráficos</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 items-end">
+                <div><label for="x-axis">Eixo X:</label><select id="x-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                <div><label for="y1-axis">Série Y1:</label><select id="y1-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                <div><label for="y1-color">Cor Y1:</label><input type="color" id="y1-color" value="#3b82f6" class="w-full h-10 mt-1"></div>
+                <div><label for="y2-axis">Série Y2:</label><select id="y2-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                <div><label for="y2-color">Cor Y2:</label><input type="color" id="y2-color" value="#ef4444" class="w-full h-10 mt-1"></div>
+            </div>
+            <div class="mt-4"><button id="update-charts-btn" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg">Atualizar Gráficos</button></div>
+        </section>
+        <section id="kpis" class="mb-6"><div id="kpi-grid" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div></section>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+            <section class="card lg:col-span-2"><h3 class="text-lg font-bold">Gráfico Combo (Barra + Linha)</h3><div class="chart-container"><canvas id="comboChart"></canvas></div></section>
+            <section class="card"><h3 class="text-lg font-bold">Comparativo de Barras</h3><div class="chart-container"><canvas id="barChart"></canvas></div></section>
+            <section class="card"><h3 class="text-lg font-bold">Evolução em Linha</h3><div class="chart-container"><canvas id="lineChart"></canvas></div></section>
+            <section class="card lg:col-span-2"><h3 class="text-lg font-bold">Gráfico de Barras Empilhadas</h3><div class="chart-container"><canvas id="stackedBarChart"></canvas></div></section>
+        </div>
+    </main>
+    <script>
+        var RAW_DATA = $JsonData;
+        var COLUMN_NAMES = $JsonColumnNames;
+        // Restante do JS é idêntico à versão 7.0 e funcionará perfeitamente no navegador.
+        var myCharts = [];
+        function parseNumericValue(v){if(typeof v==='number'){return v}if(typeof v!=='string'){return 0}var c=v.replace(/[^0-9,-]/g,'').replace(',','.');var p=parseFloat(c);return isNaN(p)?0:p}
+        function findDefaultAxes(){var d={xAxis:null,y1Axis:null,y2Axis:null},n=[],t=[];if(!RAW_DATA||RAW_DATA.length===0){return d}var f=RAW_DATA[0];for(var i=0;i<COLUMN_NAMES.length;i++){var o=COLUMN_NAMES[i],a=f[o];if(a===null||a===undefined)continue;var l=parseFloat(String(a).replace(',','.'));!isNaN(l)&&String(a).trim()!==''?n.push(o):t.push(o)}d.xAxis=t[0]||COLUMN_NAMES[0]||null;d.y1Axis=n[0]||(COLUMN_NAMES.length>1?COLUMN_NAMES[1]:null);d.y2Axis=n[1]||(COLUMN_NAMES.length>2?COLUMN_NAMES[2]:null);return d}
+        function populateControls(d){var n=['x-axis','y1-axis','y2-axis'];n.forEach(function(o){var a=document.getElementById(o);a.innerHTML=o==='y2-axis'?'<option value="Nenhum">Nenhum</option>':'';COLUMN_NAMES.forEach(function(n){a.innerHTML+='<option value="'+n+'">'+n+'</option>'})});document.getElementById('x-axis').value=d.xAxis||'';document.getElementById('y1-axis').value=d.y1Axis||'';document.getElementById('y2-axis').value=d.y2Axis||'Nenhum'}
+        function renderCharts(){myCharts.forEach(function(d){d.destroy()});myCharts=[];var n=document.getElementById('x-axis').value,o=document.getElementById('y1-axis').value,a=document.getElementById('y2-axis').value,l=document.getElementById('y1-color').value,r=document.getElementById('y2-color').value,t=a!=='Nenhum';if(!n||!o){return}var i=RAW_DATA.map(function(d){return d[n]}),e=RAW_DATA.map(function(d){return parseNumericValue(d[o])}),s=t?RAW_DATA.map(function(d){return parseNumericValue(d[a])}):[];updateKPIs(e,s,o,a,i,t);myCharts.push(createComboChart(i,e,s,o,a,l,r,t));myCharts.push(createBarChart(i,e,o,l));myCharts.push(createLineChart(i,e,o,l));myCharts.push(createStackedBarChart(i,e,s,o,a,l,r,t))}
+        function updateKPIs(d,n,o,a,l,r){var t=d.reduce(function(d,n){return d+n},0),i=r?n.reduce(function(d,n){return d+n},0):0,e=-Infinity,s=-1;for(var u=0;u<d.length;u++){if(d[u]>e){e=d[u];s=u}}var c=l[s],h=document.getElementById('kpi-grid');h.innerHTML='<div class="card"><div class="kpi-value">'+t.toLocaleString('pt-BR')+'</div><div class="kpi-label">Total de '+o+'</div></div>'+'<div class="card"><div class="kpi-value">'+(r?i.toLocaleString('pt-BR'):'N/A')+'</div><div class="kpi-label">Total de '+(r?a:'-')+'</div></div>'+'<div class="card"><div class="kpi-value">'+c+'</div><div class="kpi-label">Ponto de Maior '+o+'</div></div>'}
+        var defaultChartOptions={responsive:!0,maintainAspectRatio:!1,plugins:{legend:{position:'bottom'}}};
+        function createComboChart(d,n,o,a,l,r,t,i){var e=document.getElementById('comboChart').getContext('2d'),s=[{type:'bar',label:a,data:n,backgroundColor:r+'B3',yAxisID:'y'}];if(i){s.push({type:'line',label:l,data:o,borderColor:t,tension:.4,yAxisID:'y1'})}var u={responsive:!0,maintainAspectRatio:!1,plugins:{legend:{position:'bottom'}},scales:{y:{position:'left'},y1:{display:i,position:'right',grid:{drawOnChartArea:!1}}}};return new Chart(e,{data:{labels:d,datasets:s},options:u})}
+        function createBarChart(d,n,o,a){return new Chart(document.getElementById('barChart').getContext('2d'),{type:'bar',data:{labels:d,datasets:[{label:o,data:n,backgroundColor:a}]},options:defaultChartOptions})}
+        function createLineChart(d,n,o,a){return new Chart(document.getElementById('lineChart').getContext('2d'),{type:'line',data:{labels:d,datasets:[{label:o,data:n,borderColor:a,backgroundColor:a+'33',fill:!0,tension:.4}]},options:defaultChartOptions})}
+        function createStackedBarChart(d,n,o,a,l,r,t,i){var e=document.getElementById('stackedBarChart').getContext('2d'),s=[{label:a,data:n,backgroundColor:r}];if(i){s.push({label:l,data:o,backgroundColor:t})}var u={responsive:!0,maintainAspectRatio:!1,plugins:{legend:{position:'bottom'}},scales:{x:{stacked:!0},y:{stacked:!0}}};return new Chart(e,{type:'bar',data:{labels:d,datasets:s},options:u})}
+        document.addEventListener('DOMContentLoaded',function(){try{var d=findDefaultAxes();populateControls(d);renderCharts();document.getElementById('update-charts-btn').addEventListener('click',renderCharts)}catch(n){}});
+    </script>
+</body>
+</html>
+"@
+}
+
+
+# --- 3. Construção da Interface Gráfica (Windows Forms) ---
 
 $Form = New-Object System.Windows.Forms.Form
-$Form.Text = "PowerChart Designer (CSV Dynamic)"
-$Form.Width = 1400
-$Form.Height = 850
-$Form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-$Form.BackColor = [System.Drawing.Color]::FromArgb(240, 240, 245) 
+$Form.Text = "PowerChart Editor 8.0"
+$Form.Width = 1024
+$Form.Height = 768
+$Form.StartPosition = "CenterScreen"
 
-# Componente SplitContainer para dividir a tela: Controles à esquerda, Visualização à direita
-$SplitContainer = New-Object System.Windows.Forms.SplitContainer
-$SplitContainer.Dock = [System.Windows.Forms.DockStyle]::Fill
-$SplitContainer.SplitterDistance = 320 # Largura do painel de controle
-$SplitContainer.Orientation = [System.Windows.Forms.Orientation]::Vertical
-$SplitContainer.IsSplitterFixed = $true
-$SplitContainer.BorderStyle = [System.Windows.Forms.BorderStyle]::None
-$Form.Controls.Add($SplitContainer)
+# Layout Principal
+$MainLayout = New-Object System.Windows.Forms.TableLayoutPanel
+$MainLayout.Dock = "Fill"
+$MainLayout.ColumnCount = 1
+$MainLayout.RowCount = 2
+$MainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 50)))
+$MainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+$Form.Controls.Add($MainLayout)
 
-# Painel de Controles (Sidebar - Left Panel)
-$PanelControls = $SplitContainer.Panel1
-$PanelControls.BackColor = [System.Drawing.Color]::FromArgb(40, 50, 60) # Azul escuro/quase preto
-$PanelControls.Padding = New-Object System.Windows.Forms.Padding(10)
-$PanelControls.AutoScroll = $true
+# Painel de Controles (Topo)
+$ControlPanel = New-Object System.Windows.Forms.Panel
+$ControlPanel.Dock = "Fill"
+$ControlPanel.BackColor = [System.Drawing.Color]::FromArgb(240, 242, 245)
+$ControlPanel.Padding = New-Object System.Windows.Forms.Padding(5)
+$MainLayout.Controls.Add($ControlPanel, 0, 0)
 
-# Painel de Visualização (Right Panel)
-$PanelVisualization = $SplitContainer.Panel2
-$PanelVisualization.Padding = New-Object System.Windows.Forms.Padding(10)
+# Botões
+$ButtonLoadCsv = New-Object System.Windows.Forms.Button
+$ButtonLoadCsv.Text = "Carregar CSV"
+$ButtonLoadCsv.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$ButtonLoadCsv.Location = New-Object System.Drawing.Point(10, 10)
+$ButtonLoadCsv.Size = New-Object System.Drawing.Size(120, 30)
+$ControlPanel.Controls.Add($ButtonLoadCsv)
 
-# --- Controles dentro do Painel Lateral (Sidebar) ---
-$FlowLayoutPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$FlowLayoutPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$FlowLayoutPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::TopDown
-$FlowLayoutPanel.WrapContents = $false
-$FlowLayoutPanel.AutoScroll = $true
-$PanelControls.Controls.Add($FlowLayoutPanel)
+$ButtonGenerateHtml = New-Object System.Windows.Forms.Button
+$ButtonGenerateHtml.Text = "Gerar e Visualizar Relatório HTML"
+$ButtonGenerateHtml.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$ButtonGenerateHtml.Location = New-Object System.Drawing.Point(140, 10)
+$ButtonGenerateHtml.Size = New-Object System.Drawing.Size(220, 30)
+$ButtonGenerateHtml.Enabled = $false # Desabilitado até carregar dados
+$ControlPanel.Controls.Add($ButtonGenerateHtml)
 
-# Função auxiliar para criar labels estilizados
-function New-StyledLabel {
-    param($Text, $Bold = $false)
-    $Label = New-Object System.Windows.Forms.Label
-    $Label.Text = $Text
-    $Label.AutoSize = $true
-    $Label.ForeColor = [System.Drawing.Color]::White
-    $Label.Font = New-Object System.Drawing.Font("Segoe UI", 10, @($Bold, 0)[$Bold -eq $false])
-    $Label.Margin = New-Object System.Windows.Forms.Padding(5, 10, 5, 5) # Top margin for spacing
-    $FlowLayoutPanel.Controls.Add($Label)
-    return $Label
-}
+# Label de Status
+$StatusLabel = New-Object System.Windows.Forms.Label
+$StatusLabel.Text = "Aguardando arquivo CSV..."
+$StatusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$StatusLabel.Location = New-Object System.Drawing.Point(370, 15)
+$StatusLabel.AutoSize = $true
+$ControlPanel.Controls.Add($StatusLabel)
 
-# --- Título do Painel ---
-$Title = New-StyledLabel -Text "PowerChart Designer" -Bold $true
-$Title.Font = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
-$Title.Margin = New-Object System.Windows.Forms.Padding(5, 15, 5, 25)
-
-# ----------------- Importação CSV -----------------
-New-StyledLabel -Text "1. Fonte de Dados CSV:" -Bold $true
-
-$TextBoxFilePath = New-Object System.Windows.Forms.TextBox
-$TextBoxFilePath.Width = 290
-$TextBoxFilePath.ReadOnly = $true
-$TextBoxFilePath.BackColor = [System.Drawing.Color]::Gainsboro
-$FlowLayoutPanel.Controls.Add($TextBoxFilePath)
-
-$ButtonSelectFile = New-Object System.Windows.Forms.Button
-$ButtonSelectFile.Text = "Abrir CSV"
-$ButtonSelectFile.Width = 140
-$ButtonSelectFile.Height = 30
-$ButtonSelectFile.BackColor = [System.Drawing.Color]::FromArgb(100, 150, 255) # Azul vibrante
-$ButtonSelectFile.ForeColor = [System.Drawing.Color]::White
-$ButtonSelectFile.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$FlowLayoutPanel.Controls.Add($ButtonSelectFile)
-
-# ----------------- Seleção de Eixos (Dados) -----------------
-New-StyledLabel -Text "2. Seleção de Eixos (Dados):" -Bold $true
-
-# Eixo X
-New-StyledLabel -Text "Eixo X (Rótulos):" 
-$ComboXAxis = New-Object System.Windows.Forms.ComboBox
-$ComboXAxis.Width = 290
-$FlowLayoutPanel.Controls.Add($ComboXAxis)
-
-# Série 1 (Y1)
-New-StyledLabel -Text "Série 1 (Eixo Primário Y1):" 
-$ComboY1Data = New-Object System.Windows.Forms.ComboBox
-$ComboY1Data.Width = 290
-$FlowLayoutPanel.Controls.Add($ComboY1Data)
-
-# Série 2 (Y2)
-New-StyledLabel -Text "Série 2 (Eixo Secundário Y2):" 
-$ComboY2Data = New-Object System.Windows.Forms.ComboBox
-$ComboY2Data.Width = 290
-$FlowLayoutPanel.Controls.Add($ComboY2Data)
-
-# ----------------- Configurações de Aparência (Y1) -----------------
-New-StyledLabel -Text "3. Aparência Série 1 (Y1):" -Bold $true
-
-# Tipo de Gráfico - Y1
-New-StyledLabel -Text "Tipo Y1:" 
-$ComboY1Type = New-Object System.Windows.Forms.ComboBox
-$ComboY1Type.Width = 290
-$ComboY1Type.Items.AddRange($ChartTypes)
-$ComboY1Type.SelectedItem = "Column" 
-$FlowLayoutPanel.Controls.Add($ComboY1Type)
-
-# Cor - Y1
-$ButtonY1Color = New-Object System.Windows.Forms.Button
-$ButtonY1Color.Text = "Cor Y1: DeepSkyBlue"
-$ButtonY1Color.Width = 290
-$ButtonY1Color.Tag = [System.Drawing.Color]::DeepSkyBlue
-$ButtonY1Color.BackColor = [System.Drawing.Color]::DeepSkyBlue
-$ButtonY1Color.ForeColor = [System.Drawing.Color]::White
-$ButtonY1Color.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$ButtonY1Color.Add_Click({
-    $ColorDialog = New-Object System.Windows.Forms.ColorDialog
-    if ($ColorDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $ButtonY1Color.Tag = $ColorDialog.Color
-        $ButtonY1Color.BackColor = $ColorDialog.Color
-        $ButtonY1Color.Text = "Cor Y1: $($ColorDialog.Color.Name)"
-    }
-})
-$FlowLayoutPanel.Controls.Add($ButtonY1Color)
-
-# ----------------- Configurações de Aparência (Y2) -----------------
-New-StyledLabel -Text "4. Aparência Série 2 (Y2):" -Bold $true
-
-# Tipo de Gráfico - Y2
-New-StyledLabel -Text "Tipo Y2:" 
-$ComboY2Type = New-Object System.Windows.Forms.ComboBox
-$ComboY2Type.Width = 290
-$ComboY2Type.Items.AddRange($ChartTypes)
-$ComboY2Type.SelectedItem = "Line" 
-$FlowLayoutPanel.Controls.Add($ComboY2Type)
-
-# Cor - Y2
-$ButtonY2Color = New-Object System.Windows.Forms.Button
-$ButtonY2Color.Text = "Cor Y2: OrangeRed"
-$ButtonY2Color.Width = 290
-$ButtonY2Color.Tag = [System.Drawing.Color]::OrangeRed
-$ButtonY2Color.BackColor = [System.Drawing.Color]::OrangeRed
-$ButtonY2Color.ForeColor = [System.Drawing.Color]::White
-$ButtonY2Color.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$ButtonY2Color.Add_Click({
-    $ColorDialog = New-Object System.Windows.Forms.ColorDialog
-    if ($ColorDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $ButtonY2Color.Tag = $ColorDialog.Color
-        $ButtonY2Color.BackColor = $ColorDialog.Color
-        $ButtonY2Color.Text = "Cor Y2: $($ColorDialog.Color.Name)"
-    }
-})
-$FlowLayoutPanel.Controls.Add($ButtonY2Color)
-
-# --- Botões de Ação (Bottom Section) ---
-$PanelAction = New-Object System.Windows.Forms.Panel
-$PanelAction.Height = 150 # Altura ajustada para 3 botões
-$PanelAction.Width = 300
-$FlowLayoutPanel.Controls.Add($PanelAction)
-
-$ButtonUpdate = New-Object System.Windows.Forms.Button
-$ButtonUpdate.Name = "ButtonUpdate"
-$ButtonUpdate.Text = "ATUALIZAR GRÁFICO"
-$ButtonUpdate.Location = New-Object System.Drawing.Point(5, 5)
-$ButtonUpdate.Width = 290
-$ButtonUpdate.Height = 40
-$ButtonUpdate.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-$ButtonUpdate.BackColor = [System.Drawing.Color]::FromArgb(0, 170, 255) # Azul mais claro
-$ButtonUpdate.ForeColor = [System.Drawing.Color]::White
-$ButtonUpdate.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$PanelAction.Controls.Add($ButtonUpdate)
-
-$ButtonSaveImage = New-Object System.Windows.Forms.Button
-$ButtonSaveImage.Text = "SALVAR GRÁFICO (Imagem)"
-$ButtonSaveImage.Location = New-Object System.Drawing.Point(5, 55)
-$ButtonSaveImage.Width = 290
-$ButtonSaveImage.Height = 30
-$ButtonSaveImage.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Regular)
-$ButtonSaveImage.BackColor = [System.Drawing.Color]::LightGray
-$ButtonSaveImage.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$PanelAction.Controls.Add($ButtonSaveImage)
-
-$ButtonSaveCSV = New-Object System.Windows.Forms.Button
-$ButtonSaveCSV.Text = "SALVAR CSV (Editado)"
-$ButtonSaveCSV.Location = New-Object System.Drawing.Point(5, 95)
-$ButtonSaveCSV.Width = 290
-$ButtonSaveCSV.Height = 30
-$ButtonSaveCSV.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Regular)
-$ButtonSaveCSV.BackColor = [System.Drawing.Color]::LightGray
-$ButtonSaveCSV.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$PanelAction.Controls.Add($ButtonSaveCSV)
-
-
-# --- 5. Objeto de Gráfico e Editor de Dados (Painel de Visualização) ---
-
-# SplitContainer Vertical para Gráfico (Top) e DataGrid (Bottom)
-$VizSplitter = New-Object System.Windows.Forms.SplitContainer
-$VizSplitter.Dock = [System.Windows.Forms.DockStyle]::Fill
-$VizSplitter.Orientation = [System.Windows.Forms.Orientation]::Horizontal
-$VizSplitter.SplitterDistance = 450 # Altura inicial do gráfico
-$VizSplitter.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
-$PanelVisualization.Controls.Add($VizSplitter)
-
-# 5.1. Objeto de Gráfico (Top Panel)
-$Chart = New-Object System.Windows.Forms.DataVisualization.Charting.Chart
-$Chart.Dock = [System.Windows.Forms.DockStyle]::Fill
-$Chart.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 255)
-$Chart.BorderSkin = New-Object System.Windows.Forms.DataVisualization.Charting.BorderSkin
-$Chart.BorderSkin.SkinStyle = [System.Windows.Forms.DataVisualization.Charting.BorderSkinStyle]::Emboss
-$VizSplitter.Panel1.Controls.Add($Chart)
-$script:ChartInstance = $Chart # Salva a referência
-
-# 5.2. Data Grid (Bottom Panel)
+# Grade de Dados
 $DataGridView = New-Object System.Windows.Forms.DataGridView
-$DataGridView.Dock = [System.Windows.Forms.DockStyle]::Fill
+$DataGridView.Dock = "Fill"
 $DataGridView.BackgroundColor = [System.Drawing.Color]::White
-$DataGridView.AlternatingRowsDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(240, 245, 255)
-$DataGridView.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(220, 220, 220)
-$DataGridView.AutoGenerateColumns = $true
-$VizSplitter.Panel2.Controls.Add($DataGridView)
+$DataGridView.BorderStyle = "None"
+$DataGridView.ColumnHeadersDefaultCellStyle.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$MainLayout.Controls.Add($DataGridView, 0, 1)
 
-# --- 6. Função de Atualização do Gráfico ---
-Function Update-Chart {
-    param(
-        [Parameter(Mandatory=$true)]$Chart,
-        [Parameter(Mandatory=$true)]$ComboY1Type,
-        [Parameter(Mandatory=$true)]$ButtonY1Color,
-        [Parameter(Mandatory=$true)]$ComboY2Type,
-        [Parameter(Mandatory=$true)]$ButtonY2Color,
-        [Parameter(Mandatory=$true)]$ComboXAxis,
-        [Parameter(Mandatory=$true)]$ComboY1Data,
-        [Parameter(Mandatory=$true)]$ComboY2Data
-    )
-
-    # 6.0. Sincroniza dados do grid antes de plotar
-    Sync-DataGridToChart -DataGridView $DataGridView
-
-    $Y2ColumnName = $ComboY2Data.SelectedItem
-
-    if (-not $script:LoadedData -or $script:LoadedData.Count -eq 0) {
-        # ... Mensagem de instrução ...
-        $Chart.Titles.Clear()
-        $Chart.Series.Clear()
-        $Chart.ChartAreas.Clear()
-        $Chart.Titles.Add("Carregue um Arquivo CSV e Selecione as Colunas")
-        $Chart.Titles[0].Font = New-Object System.Drawing.Font("Segoe UI", 18, [System.Drawing.FontStyle]::Bold)
-        $Chart.Titles[0].ForeColor = [System.Drawing.Color]::Gray
-        return
-    }
-
-    if (-not $ComboXAxis.SelectedItem -or -not $ComboY1Data.SelectedItem) {
-        [System.Windows.Forms.MessageBox]::Show("Selecione as colunas para os Eixos X e Y1.", "Seleção Incompleta", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-        return
-    }
-
-    # 6.1. Limpar e Reconfigurar
-    $Chart.Titles.Clear()
-    $Chart.Series.Clear()
-    $Chart.ChartAreas.Clear()
-    $Chart.Legends.Clear()
-
-    # Nomes das colunas selecionadas
-    $XColumnName = $ComboXAxis.SelectedItem
-    $Y1ColumnName = $ComboY1Data.SelectedItem
-    
-    # Título do Gráfico
-    $TitleText = if ($Y2ColumnName -and $Y2ColumnName -ne "Nenhum") {
-        "Gráfico Combinado: $Y1ColumnName (Y1) e $Y2ColumnName (Y2) por $XColumnName"
-    } else {
-        "Gráfico Simples: $Y1ColumnName por $XColumnName"
-    }
-    $Chart.Titles.Add($TitleText)
-    $Chart.Titles[0].Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
-
-    # Configurar a Área de Plotagem
-    $ChartArea = New-Object System.Windows.Forms.DataVisualization.Charting.ChartArea("MainArea")
-    $ChartArea.BackColor = [System.Drawing.Color]::White
-    $ChartArea.BorderColor = [System.Drawing.Color]::LightGray
-    $ChartArea.BorderWidth = 1
-    
-    # Configurar Eixo X (Rótulos)
-    $ChartArea.AxisX.Title = $XColumnName
-    $ChartArea.AxisX.MajorGrid.Enabled = $false
-    $ChartArea.AxisX.Interval = 1
-    $ChartArea.AxisX.LabelStyle.Angle = -45
-
-    # Configurar Eixo Y Primário (Y1)
-    $ChartArea.AxisY.Title = "$Y1ColumnName (Eixo Primário)"
-    $ChartArea.AxisY.MajorGrid.Enabled = $false # Remove a grade do Y1
-    
-    # Configurar Eixo Y Secundário (Y2) - HABILITADO APENAS SE HOUVER SELEÇÃO
-    $IsY2Enabled = ($Y2ColumnName -and $Y2ColumnName -ne "Nenhum")
-    $ChartArea.AxisY2.Enabled = [System.Windows.Forms.DataVisualization.Charting.AxisEnabled]::False
-    if ($IsY2Enabled) {
-        $ChartArea.AxisY2.Enabled = [System.Windows.Forms.DataVisualization.Charting.AxisEnabled]::True
-        $ChartArea.AxisY2.Title = "$Y2ColumnName (Eixo Secundário)"
-        $ChartArea.AxisY2.MajorGrid.Enabled = $false # Remove a grade do Y2
-    }
-
-    $Chart.ChartAreas.Add($ChartArea)
-
-    # 6.2. Série 1: Dados (Y1)
-    $SeriesY1 = New-Object System.Windows.Forms.DataVisualization.Charting.Series($Y1ColumnName)
-    $SeriesY1.ChartType = $ComboY1Type.SelectedItem
-    $SeriesY1.Color = $ButtonY1Color.Tag
-    $SeriesY1.IsValueShownAsLabel = $true
-    
-    # 6.3. Adicionar Pontos Dinamicamente
-    $i = 0
-    foreach ($dataRow in $script:LoadedData) {
-        $xLabel = $dataRow.$XColumnName
-        
-        # PARSING ROBUSTO PARA Y1: Troca vírgula por ponto para conversão Double
-        $Y1String = $dataRow.$Y1ColumnName -replace ",", "."
-        try { $y1Value = [double]::Parse($Y1String, [System.Globalization.CultureInfo]::InvariantCulture) } catch { $y1Value = 0 }
-        
-        # Ponto Série 1 (Y1)
-        $point1 = New-Object System.Windows.Forms.DataVisualization.Charting.DataPoint($i, $y1Value)
-        $point1.AxisLabel = $xLabel
-        $SeriesY1.Points.Add($point1)
-
-        # Se Y2 estiver habilitado, adicione a Série 2
-        if ($IsY2Enabled) {
-            # PARSING ROBUSTO PARA Y2
-            $Y2String = $dataRow.$Y2ColumnName -replace ",", "."
-            try { $y2Value = [double]::Parse($Y2String, [System.Globalization.CultureInfo]::InvariantCulture) } catch { $y2Value = 0 }
-
-            # Ponto Série 2 (Y2)
-            $point2 = New-Object System.Windows.Forms.DataVisualization.Charting.DataPoint($i, $y2Value)
-            $point2.Label = "$y2Value" 
-            $SeriesY2.Points.Add($point2)
-        }
-        
-        $i++
-    }
-    
-    $Chart.Series.Add($SeriesY1)
-
-    # 6.4. Série 2: Dados (Y2) - Só adiciona se estiver habilitado
-    if ($IsY2Enabled) {
-        $SeriesY2 = New-Object System.Windows.Forms.DataVisualization.Charting.Series($Y2ColumnName)
-        $SeriesY2.ChartType = $ComboY2Type.SelectedItem
-        $SeriesY2.YAxisType = [System.Windows.Forms.DataVisualization.Charting.AxisType]::Secondary 
-        $SeriesY2.Color = $ButtonY2Color.Tag
-        $SeriesY2.BorderWidth = 3
-        $SeriesY2.MarkerStyle = [System.Windows.Forms.DataVisualization.Charting.MarkerStyle]::Circle
-        $SeriesY2.MarkerSize = 7
-        $SeriesY2.IsValueShownAsLabel = $true
-        $Chart.Series.Add($SeriesY2)
-    }
-
-
-    # 6.5. Configurar Legenda
-    $Legend = New-Object System.Windows.Forms.DataVisualization.Charting.Legend
-    $Legend.Docking = [System.Windows.Forms.DataVisualization.Charting.Docking]::Bottom
-    $Legend.Alignment = [System.Windows.Forms.DataVisualization.Charting.StringAlignment]::Center
-    $Legend.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $Chart.Legends.Add($Legend)
-}
-
-# --- 7. Eventos dos Botões ---
-
-$ButtonSelectFile.Add_Click({
-    Load-CSVData `
-        -TextBoxFilePath $TextBoxFilePath `
-        -DataGridView $DataGridView `
-        -ComboXAxis $ComboXAxis `
-        -ComboY1Data $ComboY1Data `
-        -ComboY2Data $ComboY2Data
-    $ButtonUpdate.PerformClick() # Atualiza o gráfico automaticamente
+# --- 4. Eventos ---
+$ButtonLoadCsv.Add_Click({
+    Load-CSVData -DataGridView $DataGridView -StatusLabel $StatusLabel -GenerateButton $ButtonGenerateHtml
 })
 
-$ButtonUpdate.Add_Click({
-    Update-Chart `
-        -Chart $Chart `
-        -ComboY1Type $ComboY1Type `
-        -ButtonY1Color $ButtonY1Color `
-        -ComboY2Type $ComboY2Type `
-        -ButtonY2Color $ButtonY2Color `
-        -ComboXAxis $ComboXAxis `
-        -ComboY1Data $ComboY1Data `
-        -ComboY2Data $ComboY2Data
+$ButtonGenerateHtml.Add_Click({
+    Generate-HtmlReport -DataGridView $DataGridView -StatusLabel $StatusLabel
 })
 
-$ButtonSaveImage.Add_Click({
-    if ($script:ChartInstance) {
-        Save-ChartImage -Chart $script:ChartInstance
-    } else {
-        [System.Windows.Forms.MessageBox]::Show("Nenhum gráfico para salvar.", "Aviso", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-    }
-})
-
-$ButtonSaveCSV.Add_Click({
-    if ($DataGridView.DataSource) {
-        Save-EditedCSV -DataGridView $DataGridView
-    } else {
-        [System.Windows.Forms.MessageBox]::Show("Nenhum dado para salvar.", "Aviso", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
-    }
-})
-
-# Desenhar a instrução inicial
-$Form.Add_Load({
-    Update-Chart `
-        -Chart $Chart `
-        -ComboY1Type $ComboY1Type `
-        -ButtonY1Color $ButtonY1Color `
-        -ComboY2Type $ComboY2Type `
-        -ButtonY2Color $ButtonY2Color `
-        -ComboXAxis $ComboXAxis `
-        -ComboY1Data $ComboY1Data `
-        -ComboY2Data $ComboY2Data
-})
-
-
-# Exibe a janela
+# --- 5. Exibir a Janela ---
 $Form.ShowDialog() | Out-Null
