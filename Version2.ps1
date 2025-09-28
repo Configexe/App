@@ -1,10 +1,10 @@
 # -----------------------------------------------------------------------------
-# PowerChart Designer: Editor de Dados
-# Versão: 15.0 - Edição de Renderização Estável
-# Autor: Seu Nome/Empresa
-# Descrição: Corrige o bug crítico de crescimento infinito do gráfico ao
-#            atualizar, recriando o canvas de forma robusta a cada renderização.
-#            Garante uma experiência de visualização estável e confiável.
+# Power-Graphx Editor: Editor de Dados Interativo
+# Versão: 1.6.6 - Edição de Melhorias de UI/UX
+# Autor: Jefferson/
+# Descrição: Versão aprimorada com mais tipos de gráficos, painel de formatação
+#            retrátil para ampliar a visualização e mais opções de customização
+#            para rótulos de dados.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -84,7 +84,7 @@ Function Generate-HtmlReport {
     $JsonData = $DataForJson | ConvertTo-Json -Compress -Depth 5
     $JsonColumnNames = $DataGridView.Columns.DataPropertyName | ConvertTo-Json -Compress
 
-    $OutputPath = Join-Path $env:TEMP "PowerChart_Relatorio.html"
+    $OutputPath = Join-Path $env:TEMP "PowerGraphx_Relatorio.html"
     $HtmlContent = Get-HtmlTemplate -JsonData $JsonData -JsonColumnNames $JsonColumnNames
     
     try {
@@ -107,7 +107,7 @@ Function Get-HtmlTemplate {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PowerChart - Relatório Dinâmico</title>
+    <title>Power-Graphx - Relatório Dinâmico</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
@@ -117,7 +117,7 @@ Function Get-HtmlTemplate {
         .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); padding: 1.5rem; transition: all 0.3s ease-in-out; }
         .kpi-value { font-size: 2rem; font-weight: 900; color: #1e293b; }
         .kpi-label { font-size: 0.875rem; color: #64748b; margin-top: 0.25rem; }
-        .chart-container { position: relative; width: 100%; height: 550px; } /* Altura fixa para estabilidade */
+        .chart-container { position: relative; width: 100%; height: 650px; } /* MELHORIA: Altura aumentada */
         .chart-selector label { border: 2px solid #e5e7eb; border-radius: 0.5rem; padding: 0.75rem; cursor: pointer; transition: all 0.2s ease-in-out; text-align: center; }
         .chart-selector label:hover { border-color: #9ca3af; background-color: #f9fafb; }
         .chart-selector input:checked + label { border-color: #3b82f6; background-color: #eff6ff; box-shadow: 0 0 0 2px #3b82f6; }
@@ -132,56 +132,64 @@ Function Get-HtmlTemplate {
 <body class="text-gray-900">
     <header class="bg-[#0f172a] text-white text-center py-12 px-4">
         <h1 class="text-4xl md:text-5xl font-black tracking-tight">Relatório Dinâmico Interativo</h1>
-        <p class="mt-4 text-lg text-blue-200 max-w-3xl mx-auto">Dados processados via PowerChart Editor.</p>
+        <p class="mt-4 text-lg text-blue-200 max-w-3xl mx-auto">Dados processados via Power-Graphx Editor.</p>
     </header>
     <main class="container mx-auto p-4 md:p-8 -mt-10">
         <section id="controls" class="card mb-6">
              <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div>
-                    <h2 class="text-xl font-bold text-[#1e293b] mb-4">1. Seleção de Dados</h2>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 items-end">
-                        <div><label for="x-axis">Eixo X:</label><select id="x-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
-                        <div><label for="y1-axis">Série Y1:</label><select id="y1-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
-                        <div id="y2-axis-control"><label for="y2-axis">Série Y2:</label><select id="y2-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
-                        <div><label for="y1-color">Cor Y1:</label><input type="color" id="y1-color" value="#3b82f6" class="w-full h-10 mt-1"></div>
-                        <div id="y2-color-control"><label for="y2-color">Cor Y2:</label><input type="color" id="y2-color" value="#ef4444" class="w-full h-10 mt-1"></div>
-                    </div>
-                </div>
-                <div class="flex flex-col justify-between">
-                    <div>
-                        <h2 class="text-xl font-bold text-[#1e293b] mb-4">2. Escolha o Tipo de Gráfico</h2>
-                         <div class="chart-selector grid grid-cols-4 gap-4">
-                            <div><input type="radio" name="chart-type" value="combo" id="type-combo" checked><label for="type-combo" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/><path d="M3 12l5-4 5 6 5-4"/></svg><span class="text-xs font-semibold">Combo</span></label></div>
-                            <div><input type="radio" name="chart-type" value="bar" id="type-bar"><label for="type-bar" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="text-xs font-semibold">Barras</span></label></div>
-                            <div><input type="radio" name="chart-type" value="line" id="type-line"><label for="type-line" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M3 17l5-4 5 6 5-4 4 2"/></svg><span class="text-xs font-semibold">Linha</span></label></div>
-                            <div><input type="radio" name="chart-type" value="stacked" id="type-stacked"><label for="type-stacked" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="#3b82f6" stroke="#3b82f6" stroke-width="1"><rect x="5" y="12" width="4" height="6"/><rect x="10" y="8" width="4" height="10"/><rect x="15" y="4" width="4" height="14"/><path d="M5 12V9h4v3m1-4V4h4v4m1-4V2h4v2" fill="#ef4444"/></svg><span class="text-xs font-semibold">Empilhado</span></label></div>
+                 <div>
+                     <h2 class="text-xl font-bold text-[#1e293b] mb-4">1. Seleção de Dados</h2>
+                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 items-end">
+                         <div><label for="x-axis">Eixo X:</label><select id="x-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                         <div><label for="y1-axis">Série Y1:</label><select id="y1-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                         <div id="y2-axis-control"><label for="y2-axis">Série Y2:</label><select id="y2-axis" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm"></select></div>
+                         <div><label for="y1-color">Cor Y1:</label><input type="color" id="y1-color" value="#3b82f6" class="w-full h-10 mt-1"></div>
+                         <div id="y2-color-control"><label for="y2-color">Cor Y2:</label><input type="color" id="y2-color" value="#ef4444" class="w-full h-10 mt-1"></div>
+                     </div>
+                 </div>
+                 <div class="flex flex-col justify-between">
+                     <div>
+                         <h2 class="text-xl font-bold text-[#1e293b] mb-4">2. Escolha o Tipo de Gráfico</h2>
+                         <div class="chart-selector grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                             <div><input type="radio" name="chart-type" value="combo" id="type-combo" checked><label for="type-combo" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/><path d="M3 12l5-4 5 6 5-4"/></svg><span class="text-xs font-semibold">Combo</span></label></div>
+                             <div><input type="radio" name="chart-type" value="bar" id="type-bar"><label for="type-bar" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="text-xs font-semibold">Barras</span></label></div>
+                             <div><input type="radio" name="chart-type" value="line" id="type-line"><label for="type-line" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M3 17l5-4 5 6 5-4 4 2"/></svg><span class="text-xs font-semibold">Linha</span></label></div>
+                             <div><input type="radio" name="chart-type" value="stacked" id="type-stacked"><label for="type-stacked" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="#3b82f6" stroke="#3b82f6" stroke-width="1"><rect x="5" y="12" width="4" height="6"/><rect x="10" y="8" width="4" height="10"/><rect x="15" y="4" width="4" height="14"/><path d="M5 12V9h4v3m1-4V4h4v4m1-4V2h4v2" fill="#ef4444"/></svg><span class="text-xs font-semibold">Empilhado</span></label></div>
+                             <div><input type="radio" name="chart-type" value="pie" id="type-pie"><label for="type-pie" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg><span class="text-xs font-semibold">Pizza</span></label></div>
+                             <div><input type="radio" name="chart-type" value="doughnut" id="type-doughnut"><label for="type-doughnut" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg><span class="text-xs font-semibold">Rosca</span></label></div>
+                             <div><input type="radio" name="chart-type" value="polarArea" id="type-polar"><label for="type-polar" class="flex flex-col items-center justify-center h-full"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20"/><path d="m5.2 18.8 13.6-13.6"/><path d="M12 2v20"/><path d="m18.8 18.8-13.6-13.6"/><circle cx="12" cy="12" r="10"/></svg><span class="text-xs font-semibold">Polar</span></label></div>
                          </div>
-                    </div>
-                     <div class="mt-4"><button id="update-charts-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition hover:bg-blue-700 flex items-center justify-center">
-                        <span id="btn-text">Gerar / Atualizar Gráfico</span>
-                        <svg id="btn-spinner" class="animate-spin ml-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                     </button></div>
-                </div>
-            </div>
+                     </div>
+                      <div class="mt-4"><button id="update-charts-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition hover:bg-blue-700 flex items-center justify-center">
+                          <span id="btn-text">Gerar / Atualizar Gráfico</span>
+                          <svg id="btn-spinner" class="animate-spin ml-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                      </button></div>
+                 </div>
+             </div>
         </section>
 
         <section id="kpis" class="mb-6"><div id="kpi-grid" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div></section>
         
         <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <div class="lg:col-span-3 card">
+            <div id="chart-card" class="lg:col-span-3 card transition-all duration-300">
                  <div class="flex justify-between items-center mb-4">
-                    <h3 id="chart-title" class="text-xl font-bold text-[#1e293b]"></h3>
-                    <button id="download-btn" class="bg-gray-100 text-gray-700 hover:bg-gray-200 font-bold py-2 px-4 rounded-lg transition text-sm flex items-center">
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                        Baixar (PNG)
-                    </button>
-                </div>
-                <div class="chart-container"><canvas id="mainChart"></canvas></div>
+                     <h3 id="chart-title" class="text-xl font-bold text-[#1e293b]"></h3>
+                     <div class="flex items-center space-x-2">
+                        <button id="download-btn" class="bg-gray-100 text-gray-700 hover:bg-gray-200 font-bold py-2 px-4 rounded-lg transition text-sm flex items-center">
+                             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                             Baixar (PNG)
+                         </button>
+                         <button id="toggle-format-panel-btn" title="Mostrar/Ocultar Painel de Formatação" class="bg-gray-100 text-gray-700 hover:bg-gray-200 font-bold p-2.5 rounded-lg transition text-sm flex items-center">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M5 4a1 1 0 00-2 0v2.586a1 1 0 00.293.707l6 6a1 1 0 001.414-1.414l-6-6A1 1 0 005 4.586V4zM15 16a1 1 0 002 0v-2.586a1 1 0 00-.293-.707l-6-6a1 1 0 00-1.414 1.414l6 6A1 1 0 0015 15.414V16zM17 8a1 1 0 100-2h-3a1 1 0 100 2h3zM3 12a1 1 0 100 2h3a1 1 0 100-2H3z"></path></svg>
+                         </button>
+                     </div>
+                 </div>
+                 <div class="chart-container"><canvas id="mainChart"></canvas></div>
             </div>
-            <div id="format-panel-container" class="lg:col-span-1">
+            <div id="format-panel-container" class="lg:col-span-1 transition-all duration-300">
                 <div class="card format-panel">
                     <h3 class="text-xl font-bold text-[#1e293b] mb-4">Formatar Visual</h3>
                     <div class="space-y-4">
@@ -193,6 +201,20 @@ Function Get-HtmlTemplate {
                         <div>
                             <span class="font-semibold text-gray-700 text-sm">Rótulos de Dados</span>
                             <div class="flex items-center mt-2"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-labels" class="ml-2 block text-sm text-gray-900">Exibir rótulos</label></div>
+                            <div class="mt-2 space-y-2" id="label-options">
+                                <div>
+                                    <label for="label-position" class="text-xs text-gray-600">Posição:</label>
+                                    <select id="label-position" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
+                                        <option value="top">Topo</option>
+                                        <option value="center">Centro</option>
+                                        <option value="bottom">Base</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="label-size" class="text-xs text-gray-600">Tamanho Fonte:</label>
+                                    <input type="number" id="label-size" value="12" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
+                                </div>
+                            </div>
                         </div>
                         <div class="divider"></div>
                         <div id="show-grid-control">
@@ -215,7 +237,7 @@ Function Get-HtmlTemplate {
         </div>
     </main>
     <script>
-        // --- INÍCIO DO JAVASCRIPT REESCRITO (VERSÃO 15.0) ---
+        // --- INÍCIO DO JAVASCRIPT REESCRITO (VERSÃO 1.6.6) ---
         var RAW_DATA = $JsonData;
         var COLUMN_NAMES = $JsonColumnNames;
         var chartInstance;
@@ -272,16 +294,26 @@ Function Get-HtmlTemplate {
 
         function updateControlVisibility() {
             var chartType = document.querySelector('input[name="chart-type"]:checked').value;
-            var controlsToReset = ["y2-axis-control", "y2-color-control", "show-grid-control", "y-axis-max-control", "y2-axis-max-control"];
-            controlsToReset.forEach(function(id) { document.getElementById(id).classList.remove('control-hidden'); });
-            var hideY2 = ['pie', 'doughnut', 'radar', 'scatter'];
-            if (hideY2.indexOf(chartType) > -1) {
-                document.getElementById('y2-axis-control').classList.add('control-hidden');
-                document.getElementById('y2-color-control').classList.add('control-hidden');
-                document.getElementById('y2-axis-max-control').classList.add('control-hidden');
+            var y2AxisControl = document.getElementById('y2-axis-control');
+            var y2ColorControl = document.getElementById('y2-color-control');
+            var y2AxisMaxControl = document.getElementById('y2-axis-max-control');
+            var showGridControl = document.getElementById('show-grid-control');
+            var labelOptions = document.getElementById('label-options');
+
+            var needsY2 = ['combo', 'stacked'].includes(chartType);
+            y2AxisControl.style.display = needsY2 ? 'block' : 'none';
+            y2ColorControl.style.display = needsY2 ? 'block' : 'none';
+            y2AxisMaxControl.style.display = needsY2 ? 'block' : 'none';
+
+            if (!needsY2 && document.getElementById('y2-axis').value !== 'Nenhum') {
+                document.getElementById('y2-axis').value = 'Nenhum';
             }
-            var hideGrid = ['pie', 'doughnut'];
-            if (hideGrid.indexOf(chartType) > -1) { document.getElementById('show-grid-control').classList.add('control-hidden'); }
+
+            var hideGrid = ['pie', 'doughnut', 'polarArea'].includes(chartType);
+            showGridControl.style.display = hideGrid ? 'none' : 'block';
+
+            var hideLabels = ['polarArea'].includes(chartType); // Example for specific label control
+            labelOptions.style.display = hideLabels ? 'none' : 'block';
         }
 
         function renderChart() {
@@ -307,11 +339,13 @@ Function Get-HtmlTemplate {
                     y2Col: document.getElementById('y2-axis').value,
                     y1Color: document.getElementById('y1-color').value,
                     y2Color: document.getElementById('y2-color').value,
-                    isY2Enabled: document.getElementById('y2-axis').value !== 'Nenhum',
+                    isY2Enabled: document.getElementById('y2-axis').value !== 'Nenhum' && ['combo', 'stacked'].includes(chartType),
                     yAxisAuto: document.getElementById('y-axis-auto').checked,
                     yAxisMax: document.getElementById('y-axis-max').value,
                     y2AxisAuto: document.getElementById('y2-axis-auto').checked,
-                    y2AxisMax: document.getElementById('y2-axis-max').value
+                    y2AxisMax: document.getElementById('y2-axis-max').value,
+                    labelPosition: document.getElementById('label-position').value,
+                    labelSize: document.getElementById('label-size').value
                 };
 
                 if (!uiConfig.xCol || !uiConfig.y1Col) {
@@ -340,13 +374,11 @@ Function Get-HtmlTemplate {
                     'line': function() { return [{ label: uiConfig.y1Col, data: dataY1, borderColor: uiConfig.y1Color, backgroundColor: uiConfig.y1Color + '33', fill: true, tension: 0.4 }]; },
                     'stacked': function() { var ds = [{ label: uiConfig.y1Col, data: dataY1, backgroundColor: uiConfig.y1Color }]; if (uiConfig.isY2Enabled) ds.push({ label: uiConfig.y2Col, data: dataY2, backgroundColor: uiConfig.y2Color }); return ds; },
                     'pie': function() { var colors = labels.map(function(_, i) { return 'hsl(' + (360 * i / labels.length) + ', 70%, 60%)'; }); return [{ label: uiConfig.y1Col, data: dataY1, backgroundColor: colors }]; },
-                    'radar': function() { var ds = [{ label: uiConfig.y1Col, data: dataY1, borderColor: uiConfig.y1Color, backgroundColor: uiConfig.y1Color + '4D' }]; if (uiConfig.isY2Enabled) ds.push({ label: uiConfig.y2Col, data: dataY2, borderColor: uiConfig.y2Color, backgroundColor: uiConfig.y2Color + '4D' }); return ds; },
-                    'scatter': function() { return [{ label: uiConfig.y1Col + ' vs ' + uiConfig.xCol, data: dataY1.map(function(val, idx) { return { x: labels[idx], y: val }; }), backgroundColor: uiConfig.y1Color }]; }
                 };
                 chartData.datasets = (datasetsBuilder[chartType] || datasetsBuilder['bar'])();
-                if (chartType === 'doughnut') chartData.datasets = datasetsBuilder['pie']();
+                if (chartType === 'doughnut' || chartType === 'polarArea') chartData.datasets = datasetsBuilder['pie']();
 
-                var chartRealType = ['combo', 'stacked'].indexOf(chartType) > -1 ? 'bar' : chartType;
+                var chartRealType = (chartType === 'combo' || chartType === 'stacked') ? 'bar' : chartType;
                 
                 chartInstance = new Chart(ctx, { type: chartRealType, data: chartData, options: chartOptions });
 
@@ -359,8 +391,20 @@ Function Get-HtmlTemplate {
         function buildChartOptions(chartType, config) {
             var fontColor = config.isDarkMode ? '#E2E8F0' : '#64748B';
             var gridColor = config.isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-            var options = { responsive: true, maintainAspectRatio: false, animation: { duration: 500 }, plugins: { legend: { position: 'bottom', labels: { color: fontColor } }, datalabels: { display: config.showLabels, color: config.isDarkMode ? '#FFFFFF' : '#334155', anchor: 'end', align: 'top', formatter: function(value) { return typeof value === 'object' ? value.y.toLocaleString('pt-BR') : value.toLocaleString('pt-BR'); }, font: { weight: 'bold' } } }, scales: {} };
-            if (['pie', 'doughnut'].indexOf(chartType) > -1) { options.plugins.datalabels.align = 'center'; options.plugins.datalabels.color = 'white'; return options; }
+            
+            var labelAlign = config.labelPosition === 'bottom' ? 'bottom' : (config.labelPosition === 'center' ? 'center' : 'top');
+            var labelAnchor = config.labelPosition === 'bottom' ? 'start' : (config.labelPosition === 'center' ? 'center' : 'end');
+            
+            var options = { responsive: true, maintainAspectRatio: false, animation: { duration: 500 }, plugins: { legend: { position: 'bottom', labels: { color: fontColor } }, datalabels: { display: config.showLabels, color: config.isDarkMode ? '#FFFFFF' : '#334155', anchor: labelAnchor, align: labelAlign, formatter: function(value) { return typeof value === 'object' ? value.y.toLocaleString('pt-BR') : value.toLocaleString('pt-BR'); }, font: { weight: 'bold', size: parseInt(config.labelSize) || 12 } } }, scales: {} };
+            
+            if (['pie', 'doughnut'].includes(chartType)) { 
+                options.plugins.datalabels.align = 'center'; 
+                options.plugins.datalabels.anchor = 'center';
+                options.plugins.datalabels.color = 'white'; 
+                return options; 
+            }
+            if (chartType === 'polarArea') return options;
+
             options.scales = { x: { grid: { display: config.showGrid, color: gridColor }, ticks: { color: fontColor } }, y: { grid: { display: config.showGrid, color: gridColor }, ticks: { color: fontColor }, beginAtZero: true, position: 'left' } };
             if (!config.yAxisAuto && config.yAxisMax) { options.scales.y.max = parseFloat(config.yAxisMax); }
             if (chartType === 'combo' && config.isY2Enabled) {
@@ -368,14 +412,10 @@ Function Get-HtmlTemplate {
                 if (!config.y2AxisAuto && config.y2AxisMax) { options.scales.y1.max = parseFloat(config.y2AxisMax); }
             }
             if (chartType === 'stacked') { options.scales.x.stacked = true; options.scales.y.stacked = true; }
-            if (chartType === 'radar') { options.scales = { r: { grid: { display: config.showGrid, color: gridColor }, pointLabels: { color: fontColor }, angleLines: { color: gridColor } } }; }
-            if (chartType === 'scatter') {
-                 options.scales.x.type = 'category';
-            }
             return options;
         }
 
-        function downloadChart() { if (chartInstance) { var a = document.createElement('a'); a.href = chartInstance.toBase64Image(); a.download = 'PowerChart_Grafico.png'; a.click(); } }
+        function downloadChart() { if (chartInstance) { var a = document.createElement('a'); a.href = chartInstance.toBase64Image(); a.download = 'PowerGraphx_Grafico.png'; a.click(); } }
         
         document.addEventListener('DOMContentLoaded', function() {
             try {
@@ -386,7 +426,15 @@ Function Get-HtmlTemplate {
                 document.getElementById('update-charts-btn').addEventListener('click', renderChart);
                 document.getElementById('download-btn').addEventListener('click', downloadChart);
                 
-                document.querySelectorAll('input[name="chart-type"]').forEach(function(el) { el.addEventListener('change', renderChart); });
+                var allControls = document.querySelectorAll('#controls select, #controls input, #format-panel-container input, #format-panel-container select');
+                allControls.forEach(function(el) {
+                    if (el.id !== 'update-charts-btn') {
+                        el.addEventListener('change', function() {
+                           if (el.type !== 'radio' && el.type !== 'checkbox' && !el.id.includes('axis-max')) { return; }
+                           renderChart();
+                        });
+                    }
+                });
 
                 function setupAxisControls(checkboxId, inputId) {
                     var checkbox = document.getElementById(checkboxId);
@@ -395,11 +443,24 @@ Function Get-HtmlTemplate {
                         input.disabled = e.target.checked;
                         if (!e.target.checked) { if(input.value === '') input.value = 100; input.focus(); } 
                         else { input.value = ''; }
+                        renderChart();
                     });
+                    input.addEventListener('change', renderChart);
                 }
                 setupAxisControls('y-axis-auto', 'y-axis-max');
                 setupAxisControls('y2-axis-auto', 'y2-axis-max');
-            } catch (e) { }
+
+                // Lógica para o painel retrátil
+                document.getElementById('toggle-format-panel-btn').addEventListener('click', function() {
+                    var formatPanel = document.getElementById('format-panel-container');
+                    var chartCard = document.getElementById('chart-card');
+                    formatPanel.classList.toggle('lg:hidden');
+                    chartCard.classList.toggle('lg:col-span-3');
+                    chartCard.classList.toggle('lg:col-span-4');
+                    setTimeout(function() { if (chartInstance) chartInstance.resize(); }, 300);
+                });
+
+            } catch (e) { console.error("Erro na inicialização:", e); }
         });
     </script>
 </body>
@@ -408,12 +469,13 @@ Function Get-HtmlTemplate {
 }
 
 # --- 3. Construção da Interface Gráfica (Windows Forms) ---
-# O código do editor PowerShell continua o mesmo.
 $Form = New-Object System.Windows.Forms.Form
-$Form.Text = "PowerChart Editor 15.0"
+$Form.Text = "Power-Graphx Editor v1.6.6" # NOME ATUALIZADO
 $Form.Width = 1200
 $Form.Height = 800
 $Form.StartPosition = "CenterScreen"
+# Simboliza a análise de dados.
+$Form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon("C:\Windows\System32\imageres.dll,178")
 
 $MainLayout = New-Object System.Windows.Forms.TableLayoutPanel
 $MainLayout.Dock = "Fill"
@@ -469,4 +531,3 @@ $ButtonGenerateHtml.Add_Click({
 
 # --- 5. Exibir a Janela ---
 $Form.ShowDialog() | Out-Null
-
