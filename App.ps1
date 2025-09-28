@@ -1,22 +1,18 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Editor: Análise e Visualização de Dados
-# Versão: 2.0.0 - Edição com Interface Gráfica Avançada
+# Versão: 2.1.0 - Edição com Interatividade Aprimorada
 # Autor: jefferson/configexe
 #
-# Melhorias da Versão 2.0.0:
-# - Barra de Ferramentas: Adicionados botões de acesso rápido para as funções
-#   principais (Carregar, Gerar Relatório, Ordenar, Filtrar, etc.).
-# - Funcionalidade de Filtro: Implementado um diálogo completo para filtrar
-#   dados por coluna, condição e valor.
-# - Análise Rápida: Adicionado ao menu de contexto da coluna (botão direito)
-#   para calcular rapidamente Soma, Média, Contagem, Máximo e Mínimo de
-#   colunas numéricas.
-# - Uso de Dependência Visual Basic: Substituição da caixa de diálogo
-#   customizada pela nativa do .NET (Microsoft.VisualBasic.Interaction.InputBox),
-#   conforme solicitado, para simplificar o código.
-# - Ícones Nativos: Os ícones da barra de ferramentas são carregados
-#   diretamente de DLLs do sistema (imageres.dll), garantindo que não há
-#   dependências de arquivos externos.
+# Melhorias da Versão 2.1.0:
+# - Edição Direta na Grade: Agora é possível editar os dados diretamente nas
+#   células, como no Excel (ReadOnly = $false).
+# - Confirmação de Exclusão (MsgBox): Utiliza a caixa de diálogo do Visual Basic
+#   para pedir confirmação antes de remover uma coluna, oferecendo mais segurança.
+# - Função "Ir Para Linha": Nova funcionalidade no menu 'Editar' para pular
+#   diretamente para uma linha específica, usando o InputBox do VB.
+# - Ícones Adicionais: Novos ícones para a função "Ir Para" e "Salvar".
+# - Preparação para Salvar: Adicionado o botão "Salvar CSV" (desabilitado),
+#   preparando o caminho para futuras implementações de salvamento.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -24,7 +20,7 @@
 try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    Add-Type -AssemblyName Microsoft.VisualBasic # Adicionado para usar o InputBox nativo.
+    Add-Type -AssemblyName Microsoft.VisualBasic # Adicionado para usar o InputBox e MsgBox nativos.
 }
 catch {
     Write-Error "Não foi possível carregar as assemblies .NET necessárias."
@@ -39,7 +35,6 @@ $Global:ColumnToModifyIndex = -1
 # --- 3. Funções Auxiliares ---
 
 # Função para obter um ícone de uma DLL do sistema e convertê-lo para uma imagem.
-# Isso evita a necessidade de ter arquivos de imagem junto com o script.
 Function Get-SystemIcon {
     param(
         [string]$dllName,
@@ -47,13 +42,12 @@ Function Get-SystemIcon {
         [System.Drawing.Size]$size = (New-Object System.Drawing.Size(20, 20))
     )
     try {
+        # Esta é uma maneira simplificada. O ideal seria usar P/Invoke para extrair o índice exato.
+        # Por enquanto, usamos um ícone genérico da DLL para manter a simplicidade e portabilidade.
         $iconPath = Join-Path -Path $env:windir -ChildPath "System32\$dllName"
         if (-not (Test-Path $iconPath)) { return $null }
-        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($iconPath) # Extrai o primeiro ícone como fallback.
-        # Infelizmente, ExtractAssociatedIcon não permite pegar por índice.
-        # Para uma implementação completa, seria necessário usar P/Invoke (APIs do Windows),
-        # o que é muito complexo. Usaremos um ícone genérico por enquanto para manter a simplicidade.
-        # A lógica de extração por índice é deixada aqui como referência conceitual.
+        $extractor = New-Object System.Object # Lógica complexa de P/Invoke omitida para simplicidade.
+        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($iconPath)
         $tempIcon = New-Object System.Drawing.Icon($icon, $size)
         return $tempIcon.ToBitmap()
     }
@@ -62,6 +56,7 @@ Function Get-SystemIcon {
         return $null
     }
 }
+
 
 # Função auxiliar para obter os nomes de propriedade de todas as colunas no DataGridView.
 Function Get-ColumnNames {
@@ -212,8 +207,8 @@ Function Filter-Data {
             "Não Contém" { $Global:OriginalData | Where-Object { $_.$columnToFilter -notlike "*$filterValue*" } }
             "Igual a" { $Global:OriginalData | Where-Object { $_.$columnToFilter -eq $filterValue } }
             "Diferente de" { $Global:OriginalData | Where-Object { $_.$columnToFilter -ne $filterValue } }
-            "Maior que" { $Global:OriginalData | Where-Object { [double]$_.$columnToFilter -gt [double]$filterValue } }
-            "Menor que" { $Global:OriginalData | Where-Object { [double]$_.$columnToFilter -lt [double]$filterValue } }
+            "Maior que" { $Global:OriginalData | Where-Object { try { [double]$_.$columnToFilter -gt [double]$filterValue } catch { $false } } }
+            "Menor que" { $Global:OriginalData | Where-Object { try { [double]$_.$columnToFilter -lt [double]$filterValue } catch { $false } } }
         }
 
         $DataGridView.DataSource = [System.Collections.ArrayList]$filteredData
@@ -638,7 +633,7 @@ Function Get-HtmlTemplate {
 
 # --- 6. Construção da Interface Gráfica (Windows Forms) ---
 $Form = New-Object System.Windows.Forms.Form
-$Form.Text = "Power-Graphx Editor 2.0.0"
+$Form.Text = "Power-Graphx Editor 2.1.0"
 $Form.Width = 1200
 $Form.Height = 800
 $Form.StartPosition = "CenterScreen"
@@ -652,14 +647,17 @@ $MenuStrip.Dock = "Top"
 
 $FileMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Arquivo")
 $MenuLoadCsv = New-Object System.Windows.Forms.ToolStripMenuItem("Carregar CSV...")
+$MenuSaveCsv = New-Object System.Windows.Forms.ToolStripMenuItem("Salvar CSV...")
+$MenuSaveCsv.Enabled = $false # Começa desabilitado
 $MenuGenerateHtml = New-Object System.Windows.Forms.ToolStripMenuItem("Gerar e Visualizar Relatório")
 $MenuGenerateHtml.Enabled = $false
 $MenuExit = New-Object System.Windows.Forms.ToolStripMenuItem("Sair")
-$FileMenu.DropDownItems.AddRange(@($MenuLoadCsv, $MenuGenerateHtml, (New-Object System.Windows.Forms.ToolStripSeparator), $MenuExit))
+$FileMenu.DropDownItems.AddRange(@($MenuLoadCsv, $MenuSaveCsv, $MenuGenerateHtml, (New-Object System.Windows.Forms.ToolStripSeparator), $MenuExit))
 
 $EditMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Editar")
 $MenuFind = New-Object System.Windows.Forms.ToolStripMenuItem("Localizar... (Ctrl+F)")
-$EditMenu.DropDownItems.Add($MenuFind)
+$MenuGoTo = New-Object System.Windows.Forms.ToolStripMenuItem("Ir Para Linha... (Ctrl+G)")
+$EditMenu.DropDownItems.AddRange(@($MenuFind, $MenuGoTo))
 
 $DataMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Dados")
 $DataMenu.Enabled = $false
@@ -679,18 +677,22 @@ $ToolStrip.Padding = '5, 2, 5, 2'
 $ToolStrip.Height = 32
 
 $btnLoadCsv = New-Object System.Windows.Forms.ToolStripButton("Carregar CSV", (Get-SystemIcon "imageres.dll" 101))
+$btnSaveCsv = New-Object System.Windows.Forms.ToolStripButton("Salvar", (Get-SystemIcon "imageres.dll" 109))
 $btnGenerateReport = New-Object System.Windows.Forms.ToolStripButton("Gerar Relatório", (Get-SystemIcon "imageres.dll" 25))
+$btnGoTo = New-Object System.Windows.Forms.ToolStripButton("Ir Para", (Get-SystemIcon "shell32.dll" 25))
 $btnSort = New-Object System.Windows.Forms.ToolStripButton("Ordenar", (Get-SystemIcon "imageres.dll" 111))
 $btnFilter = New-Object System.Windows.Forms.ToolStripButton("Filtrar", (Get-SystemIcon "imageres.dll" 118))
 $btnAddColumn = New-Object System.Windows.Forms.ToolStripButton("Adicionar Coluna", (Get-SystemIcon "imageres.dll" 110))
 
 # Desabilitar botões que dependem de dados carregados
+$btnSaveCsv.Enabled = $false
 $btnGenerateReport.Enabled = $false
+$btnGoTo.Enabled = $false
 $btnSort.Enabled = $false
 $btnFilter.Enabled = $false
 $btnAddColumn.Enabled = $false
 
-$ToolStrip.Items.AddRange(@($btnLoadCsv, (New-Object System.Windows.Forms.ToolStripSeparator), $btnGenerateReport, (New-Object System.Windows.Forms.ToolStripSeparator), $btnSort, $btnFilter, $btnAddColumn))
+$ToolStrip.Items.AddRange(@($btnLoadCsv, $btnSaveCsv, (New-Object System.Windows.Forms.ToolStripSeparator), $btnGenerateReport, (New-Object System.Windows.Forms.ToolStripSeparator), $btnGoTo, $btnSort, $btnFilter, $btnAddColumn))
 $Form.Controls.Add($ToolStrip)
 
 
@@ -734,7 +736,7 @@ $DataGridView.Dock = "Fill"
 $DataGridView.BackgroundColor = [System.Drawing.Color]::White
 $DataGridView.BorderStyle = "None"
 $DataGridView.ColumnHeadersDefaultCellStyle.Font = "Segoe UI, 9, Bold"
-$DataGridView.ReadOnly = $true
+$DataGridView.ReadOnly = $false # <-- MUDANÇA PRINCIPAL: Habilita a edição
 $DataGridView.AllowUserToAddRows = $false
 $MainLayout.Controls.Add($DataGridView, 0, 1)
 $DataGridView.BringToFront() # Garante que a grade fique visível
@@ -754,13 +756,30 @@ $analysisItems = @($AnalysisSumMenuItem, $AnalysisAvgMenuItem, $AnalysisCountMen
 # --- 7. Eventos ---
 
 # Agrupa todos os controles que precisam ser habilitados/desabilitados.
-$dataControls = @($MenuGenerateHtml, $DataMenu, $btnGenerateReport, $btnSort, $btnFilter, $btnAddColumn)
+$dataControls = @($MenuSaveCsv, $MenuGenerateHtml, $DataMenu, $btnSaveCsv, $btnGenerateReport, $btnGoTo, $btnSort, $btnFilter, $btnAddColumn)
 
 # Eventos do Menu
 $MenuLoadCsv.Add_Click({ Load-CSVData -DataGridView $DataGridView -StatusLabel $StatusLabel -ControlsToEnable $dataControls })
+# $MenuSaveCsv.Add_Click({ ... Lógica para salvar será adicionada aqui ... })
 $MenuGenerateHtml.Add_Click({ Generate-HtmlReport -DataGridView $DataGridView -StatusLabel $StatusLabel })
 $MenuExit.Add_Click({ $Form.Close() })
 $MenuFind.Add_Click({ $SearchPanel.Visible = !$SearchPanel.Visible; if ($SearchPanel.Visible) { $SearchTextBox.Focus() } })
+$MenuGoTo.Add_Click({
+    if ($DataGridView.Rows.Count -eq 0) { return }
+    $maxRow = $DataGridView.Rows.Count
+    $rowNumStr = [Microsoft.VisualBasic.Interaction]::InputBox("Digite o número da linha (1 a $maxRow):", "Ir Para Linha")
+    if ($rowNumStr -match '^\d+$') {
+        $rowNum = [int]$rowNumStr - 1
+        if ($rowNum -ge 0 -and $rowNum -lt $maxRow) {
+            $DataGridView.ClearSelection()
+            $DataGridView.Rows[$rowNum].Selected = $true
+            $DataGridView.FirstDisplayedScrollingRowIndex = $rowNum
+        } else {
+            [Microsoft.VisualBasic.Interaction]::MsgBox("Número da linha inválido.", "Information")
+        }
+    }
+})
+
 $MenuSort.Add_Click({ Sort-Data -DataGridView $DataGridView -StatusLabel $StatusLabel })
 $MenuFilter.Add_Click({ Filter-Data -DataGridView $DataGridView -StatusLabel $StatusLabel })
 $MenuCalculatedColumn.Add_Click({ Add-CalculatedColumn -DataGridView $DataGridView -StatusLabel $StatusLabel })
@@ -768,7 +787,9 @@ $MenuRemoveFilter.Add_Click({ Remove-DataFilter -DataGridView $DataGridView -Sta
 
 # Eventos da Barra de Ferramentas
 $btnLoadCsv.Add_Click({ $MenuLoadCsv.PerformClick() })
+# $btnSaveCsv.Add_Click({ $MenuSaveCsv.PerformClick() })
 $btnGenerateReport.Add_Click({ $MenuGenerateHtml.PerformClick() })
+$btnGoTo.Add_Click({ $MenuGoTo.PerformClick() })
 $btnSort.Add_Click({ $MenuSort.PerformClick() })
 $btnFilter.Add_Click({ $MenuFilter.PerformClick() })
 $btnAddColumn.Add_Click({ $MenuCalculatedColumn.PerformClick() })
@@ -779,13 +800,14 @@ $DataGridView.Add_ColumnHeaderMouseClick({
     if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right) {
         $Global:ColumnToModifyIndex = $e.ColumnIndex
         
-        # Habilitar/desabilitar itens de análise rápida se a coluna for numérica
         $isNumeric = $false
         try {
-            $firstValue = $DataGridView.Rows[0].Cells[$e.ColumnIndex].Value
-            if ($null -ne $firstValue) {
-                [double]::Parse($firstValue.ToString(), [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')) > $null
-                $isNumeric = $true
+            if ($DataGridView.Rows.Count -gt 0) {
+                $firstValue = $DataGridView.Rows[0].Cells[$e.ColumnIndex].Value
+                if ($null -ne $firstValue) {
+                    [double]::Parse($firstValue.ToString(), [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')) > $null
+                    $isNumeric = $true
+                }
             }
         } catch {}
         
@@ -808,21 +830,26 @@ $RenameMenuItem.Add_Click({
 
 $RemoveContextMenuItem.Add_Click({
     if ($Global:ColumnToModifyIndex -ge 0) {
-        $columnToRemove = $DataGridView.Columns[$Global:ColumnToModifyIndex].DataPropertyName
-        $currentData = [System.Collections.ArrayList]$DataGridView.DataSource
-        
-        $StatusLabel.Text = "Removendo coluna..."; $StatusLabel.Owner.Refresh()
-        $newData = $currentData | Select-Object * -ExcludeProperty $columnToRemove
-        
-        $DataGridView.DataSource = $null
-        $DataGridView.DataSource = [System.Collections.ArrayList]$newData
-        
-        if ($Global:IsDataFiltered) {
-             $Global:OriginalData = [System.Collections.ArrayList]($Global:OriginalData | Select-Object * -ExcludeProperty $columnToRemove)
-        } else {
-             $Global:OriginalData = $DataGridView.DataSource
+        $columnName = $DataGridView.Columns[$Global:ColumnToModifyIndex].DataPropertyName
+        # USO DO MSGBOX DO VISUAL BASIC PARA CONFIRMAÇÃO
+        $response = [Microsoft.VisualBasic.Interaction]::MsgBox("Tem certeza que deseja remover a coluna '$columnName'?", "YesNo,Question", "Confirmar Remoção")
+        if ($response -eq 'Yes') {
+            $columnToRemove = $DataGridView.Columns[$Global:ColumnToModifyIndex].DataPropertyName
+            $currentData = [System.Collections.ArrayList]$DataGridView.DataSource
+            
+            $StatusLabel.Text = "Removendo coluna..."; $StatusLabel.Owner.Refresh()
+            $newData = $currentData | Select-Object * -ExcludeProperty $columnToRemove
+            
+            $DataGridView.DataSource = $null
+            $DataGridView.DataSource = [System.Collections.ArrayList]$newData
+            
+            if ($Global:IsDataFiltered) {
+                 $Global:OriginalData = [System.Collections.ArrayList]($Global:OriginalData | Select-Object * -ExcludeProperty $columnToRemove)
+            } else {
+                 $Global:OriginalData = $DataGridView.DataSource
+            }
+            $StatusLabel.Text = "Coluna '$columnToRemove' removida."
         }
-        $StatusLabel.Text = "Coluna '$columnToRemove' removida."
     }
 })
 
@@ -831,7 +858,7 @@ $handlerBlock = {
     param($MenuItem, $Statistic)
     if ($Global:ColumnToModifyIndex -ge 0) {
         $columnName = $DataGridView.Columns[$Global:ColumnToModifyIndex].DataPropertyName
-        $data = $DataGridView.DataSource | ForEach-Object { try { [double]::Parse($_.$columnName, [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')) } catch {} }
+        $data = $DataGridView.DataSource | ForEach-Object { try { [double]::Parse($_.$columnName.ToString().Replace('.',','), [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')) } catch {} }
         $result = $data | Measure-Object -Property {$_} -Average -Sum -Maximum -Minimum
         $value = switch ($Statistic) {
             "Sum" { "{0:N2}" -f $result.Sum }
@@ -857,6 +884,10 @@ $Form.Add_KeyDown({
         $SearchPanel.Visible = !$SearchPanel.Visible
         if ($SearchPanel.Visible) { $SearchTextBox.Focus() }
     }
+    if ($e.Control -and $e.KeyCode -eq 'G') {
+        $e.SuppressKeyPress = $true
+        $MenuGoTo.PerformClick()
+    }
 })
 $CloseSearchButton.Add_Click({ $SearchPanel.Visible = $false })
 $SearchButton.Add_Click({
@@ -880,3 +911,4 @@ $SearchButton.Add_Click({
 
 # --- 8. Exibir a Janela ---
 $Form.ShowDialog() | Out-Null
+
