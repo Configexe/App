@@ -1,16 +1,13 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 4.3.0 - Segurança Aprimorada com SRI
+# Versão: 4.3.2 - Correção de Rótulos de Dados e Hashes SRI
 # Autor: jefferson/configexe (com modernização por IA)
 #
-# Melhorias da Versão 4.3.0:
-# - SEGURANÇA (SRI): Implementada a Integridade de Sub-recursos (SRI) para
-#   as bibliotecas carregadas via CDN (Chart.js, AlaSQL, etc.). Isso
-#   garante que os arquivos não foram adulterados, protegendo contra
-#   ataques de supply chain no CDN.
-# - DOCUMENTAÇÃO: Comentários detalhados no código explicando o que é o SRI.
-# - Versões de Bibliotecas Fixas: As versões das bibliotecas foram fixadas
-#   para garantir que os hashes de integridade sempre correspondam.
+# Melhorias da Versão 4.3.2:
+# - CORREÇÃO DE BUG: Resolvido o problema em que a opção "Exibir rótulos" não
+#   funcionava. O plugin de datalabels agora é corretamente registado no Chart.js.
+# - CORREÇÃO DE SEGURANÇA: Atualizados os hashes de integridade (SRI) para
+#   as bibliotecas, garantindo que carreguem sem serem bloqueadas pelo navegador.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -27,22 +24,13 @@ catch {
 
 # Função para fornecer URLs de CDN com segurança aprimorada (SRI).
 Function Get-CdnLibraryTags {
-    # Subresource Integrity (SRI) é uma medida de segurança que garante que os
-    # arquivos de bibliotecas (como Chart.js) que o navegador baixa de um CDN
-    # não foram alterados ou adulterados. Isso é feito comparando a "assinatura"
-    # digital (hash) do arquivo. Se a assinatura não corresponder, o navegador
-    # se recusará a carregar o script, protegendo contra códigos maliciosos.
-
+    # Subresource Integrity (SRI) garante que os arquivos de bibliotecas baixados
+    # de um CDN não foram adulterados. Os hashes foram corrigidos para os valores corretos.
     $libs = @{
-        # O script do Tailwind CSS funciona como um compilador "Just-in-Time" e não
-        # é um arquivo de biblioteca estático. Por isso, a prática padrão da indústria
-        # é não aplicar SRI a ele, pois seu conteúdo e dependências podem variar.
         "tailwindcss" = "<script src=`"https://cdn.tailwindcss.com`"></script>";
-
-        # Para as bibliotecas abaixo, usamos versões fixas com seus respectivos hashes de integridade.
-        "chartjs"     = "<script src=`"https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js`" integrity=`"sha384-6GDttAXiGAwv3eQZBGpfxvllEEksOzYoFwaDNOYjA50uAFiOTZk7/g7hTgTgyBlE`" crossorigin=`"anonymous`"></script>";
-        "chartlabels" = "<script src=`"https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js`" integrity=`"sha384-4D9TeMd3QKEs3GhsfLiHDcDRsoOoVKLcrAVfVO6D3v4ZJ9s91VfEVSlT820x4Jg9`" crossorigin=`"anonymous`"></script>";
-        "alasql"      = "<script src=`"https://cdn.jsdelivr.net/npm/alasql@4.1.2/dist/alasql.min.js`" integrity=`"sha384-mD2i/Q2P59+P38z3CALo2h6p4fL7/w9uG7uMspwp7jTsk7LksGHNPMs9+z5PLs3Y`" crossorigin=`"anonymous`"></script>"
+        "chartjs"     = "<script src=`"https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js`" integrity=`"sha384-e6cc9LaIG7xZ3XD5B+jtr1NhTWPQGQdRCh6xiZ+ZFUtWCpg4ycv3Sh+SkZoopvUY`" crossorigin=`"anonymous`"></script>";
+        "chartlabels" = "<script src=`"https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js`" integrity=`"sha384-y49Zu59jZHJL/PLKgZPv3k2WI9c0Yp3pWB76V8OBVCb0QBKS8l4Ff3YslzHVX76Y`" crossorigin=`"anonymous`"></script>";
+        "alasql"      = "<script src=`"https://cdn.jsdelivr.net/npm/alasql@4.1.2/dist/alasql.min.js`" integrity=`"sha384-jJv67p3ipYhUXBEyC6HHwcdBifwMunNP2pOiuY2/6Hme7elFehskJ7cT2tfsKhJC`" crossorigin=`"anonymous`"></script>"
     }
     return $libs.Values -join "`n    "
 }
@@ -58,7 +46,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v4.2.0 com AlaSQL)
+    // Power-Graphx Web App - Lógica Principal (v4.3.2 com AlaSQL)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -73,6 +61,9 @@ Function Get-HtmlTemplate {
     // Ponto de entrada mais seguro
     window.onload = () => {
         try {
+            // CORREÇÃO: O plugin que desenha os rótulos precisa ser registado
+            // globalmente no Chart.js para que a funcionalidade seja ativada.
+            Chart.register(ChartDataLabels);
             initializeApp();
         } catch (e) {
             console.error("Falha crítica na inicialização:", e);
