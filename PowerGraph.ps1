@@ -1,13 +1,14 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 4.1.2 - Correção Crítica na Criação de Gráficos
+# Versão: 4.2.0 - Legenda do Gráfico Personalizável
 # Autor: jefferson/configexe (com modernização por IA)
 #
-# Melhorias da Versão 4.1.2:
-# - CORREÇÃO DE BUG: Resolvido o problema em que os seletores de Eixo X e
-#   Eixo Y não eram populados ao adicionar um novo painel de gráfico.
-# - ESTABILIDADE: Corrigido um erro relacionado aos seletores de tipo de
-#   gráfico que poderia ocorrer ao usar múltiplos painéis.
+# Melhorias da Versão 4.2.0:
+# - Legenda Personalizada: Adicionado um campo "Nome da Série (Legenda)"
+#   em cada série de dados, permitindo personalizar o texto que aparece
+#   na legenda e nos tooltips do gráfico.
+# - Layout Aprimorado: O painel "Séries de Dados" foi reorganizado para
+#   acomodar a nova opção de forma mais limpa e intuitiva.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -44,7 +45,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v4.1.2 com AlaSQL)
+    // Power-Graphx Web App - Lógica Principal (v4.2.0 com AlaSQL)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -490,6 +491,7 @@ Function Get-HtmlTemplate {
         newSeries.innerHTML = `
             <div><label class="text-xs font-semibold">Eixo X / Grupo:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
             <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option></select></div></div>
+            <div class="sm:col-span-2"><label class="text-xs font-semibold">Nome da Série (Legenda):</label><input type="text" name="series-label" class="mt-1 block w-full rounded-md border-gray-300 text-sm" placeholder="Opcional. Ex: Total de Vendas"></div>
             <div class="combo-type-control" style="display: none;"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
             <div class="flex items-end space-x-2"><div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="#3b82f6" name="color" class="mt-1 w-full h-9 p-0 border-0 bg-white rounded-md"></div>
                 ${!isFirst ? `<button type="button" class="remove-series-btn h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600">&times;</button>` : ''}</div>`;
@@ -541,6 +543,7 @@ Function Get-HtmlTemplate {
             const yCol = control.querySelector('[name="y-axis"]').value;
             const xCol = control.querySelector('[name="x-axis"]').value;
             const agg = control.querySelector('[name="aggregation"]').value;
+            const customLabel = control.querySelector('input[name="series-label"]').value;
             const seriesTypeOption = control.querySelector('[name="series-type"]').value;
             let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
             
@@ -558,7 +561,7 @@ Function Get-HtmlTemplate {
             });
 
             return {
-                label: `${yCol} (${agg})`,
+                label: customLabel.trim() || `${yCol} (${agg})`,
                 data: data, borderColor: control.querySelector('[name="color"]').value,
                 backgroundColor: control.querySelector('[name="color"]').value + 'B3', type: seriesType,
                 tension: parseFloat(section.querySelector('.line-interpolation').value) || 0.4,
