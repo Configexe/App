@@ -1,938 +1,692 @@
 # -----------------------------------------------------------------------------
-# Power-Graphx Editor: Análise e Visualização de Dados
-# Versão: 1.7.9 - Edição com Documentação Completa
-# Autor: jefferson/configexe
-
+# Power-Graphx Web App Launcher
+# Versão: 3.1.0 - Edição Web com Gráficos Corrigidos e Exportação
+# Autor: jefferson/configexe (com modernização por IA)
+#
+# Melhorias da Versão 3.1.0:
+# - Correção de Gráficos: Lógica de renderização de gráficos em JavaScript
+#   ajustada para exibir corretamente cada tipo (barra, linha, combo).
+# - Exportação para PNG: Adicionado botão "Baixar Gráfico (PNG)" no modal
+#   de visualização para salvar a imagem do gráfico gerado.
+# - Painel de Formatação: Reintroduzido um painel completo para formatar
+#   a aparência dos gráficos (rótulos, eixos, cores, etc.).
+# - Plugin de Rótulos Ativado: A biblioteca de rótulos (ChartDataLabels)
+#   agora está corretamente registrada e funcional.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
-# Adiciona as bibliotecas .NET necessárias para a criação de interfaces gráficas
-# com Windows Forms e para manipulação de elementos gráficos como ícones e cores.
 try {
     Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Web # Para codificação de JavaScript
 }
 catch {
-    Write-Error "Não foi possível carregar as assemblies necessárias."
+    Write-Error "Não foi possível carregar as assemblies .NET necessárias."
     exit 1
 }
 
-# --- 2. Variáveis Globais de Estado ---
-# Mantêm o estado da aplicação entre diferentes funções.
-$Global:OriginalData = $null      # Armazena a lista de dados original carregada do CSV.
-$Global:IsDataFiltered = $false     # Flag para indicar se um filtro está atualmente aplicado.
-$Global:ColumnToModifyIndex = -1    # Armazena o índice da coluna clicada com o botão direito.
+# --- 2. Funções Principais ---
 
-# --- 3. Funções Auxiliares de UI ---
-
-# Função para criar uma caixa de diálogo e solicitar entrada do usuário.
-# O PowerShell não possui um "InputBox" nativo, então criamos um formulário simples para isso.
-Function Show-InputBox {
-    param(
-        [string]$Title,
-        [string]$Prompt,
-        [string]$DefaultText = ""
-    )
-    # Criação e configuração do formulário.
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = $Title
-    $form.Font = 'Segoe UI, 9'
-    $form.StartPosition = 'CenterScreen'
-    $form.ClientSize = New-Object System.Drawing.Size(350, 120)
-    $form.FormBorderStyle = 'FixedDialog'
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
-
-    # Adiciona um rótulo com a pergunta para o usuário.
-    $label = New-Object System.Windows.Forms.Label
-    $label.Text = $Prompt
-    $label.Location = New-Object System.Drawing.Point(10, 15)
-    $label.AutoSize = $true
-    $form.Controls.Add($label)
-
-    # Adiciona a caixa de texto para entrada.
-    $textBox = New-Object System.Windows.Forms.TextBox
-    $textBox.Text = $DefaultText
-    $textBox.Location = New-Object System.Drawing.Point(12, 40)
-    $textBox.Size = New-Object System.Drawing.Size(326, 23)
-    $form.Controls.Add($textBox)
-
-    # Adiciona o botão "OK".
-    $okButton = New-Object System.Windows.Forms.Button
-    $okButton.Text = "OK"
-    $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $okButton.Location = New-Object System.Drawing.Point(182, 75)
-    $form.Controls.Add($okButton)
-    $form.AcceptButton = $okButton # Permite pressionar Enter para confirmar.
-
-    # Adiciona o botão "Cancelar".
-    $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = "Cancelar"
-    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $cancelButton.Location = New-Object System.Drawing.Point(263, 75)
-    $form.Controls.Add($cancelButton)
-    $form.CancelButton = $cancelButton # Permite pressionar Esc para cancelar.
-
-    # Exibe o formulário e aguarda a interação do usuário.
-    if ($form.ShowDialog() -eq 'OK') {
-        return $textBox.Text # Retorna o texto se OK for pressionado.
+# Função para baixar e embutir as bibliotecas JS/CSS.
+# Elas são baixadas para uma pasta temporária para não precisar buscar na internet toda vez.
+Function Get-EmbeddedLibraries {
+    $tempDir = Join-Path $env:TEMP "PowerGraphx_Libs"
+    if (-not (Test-Path $tempDir)) {
+        New-Item -Path $tempDir -ItemType Directory | Out-Null
     }
-    return $null # Retorna nulo se for cancelado.
-}
 
-# Função auxiliar para obter os nomes de propriedade de todas as colunas no DataGridView.
-Function Get-ColumnNames {
-    param([Parameter(Mandatory=$true)]$DataGridView)
-    $columnNames = @()
-    foreach ($column in $DataGridView.Columns) {
-        $columnNames += $column.DataPropertyName
+    $libs = @{
+        "tailwindcss" = "https://cdn.tailwindcss.com";
+        "chartjs"     = "https://cdn.jsdelivr.net/npm/chart.js";
+        "chartlabels" = "https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"
     }
-    return $columnNames
-}
 
-# --- 4. Funções de Manipulação de Dados ---
-
-# Abre um diálogo para carregar um arquivo CSV e exibi-lo na grade.
-Function Load-CSVData {
-    param(
-        [Parameter(Mandatory=$true)]$DataGridView,
-        [Parameter(Mandatory=$true)]$StatusLabel,
-        [Parameter(Mandatory=$true)]$MenuItemsToEnable
-    )
-    # Configura e exibe a janela de seleção de arquivo.
-    $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
-    $OpenFileDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
-    $OpenFileDialog.Title = "Selecione o arquivo CSV"
-
-    if ($OpenFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $FilePath = $OpenFileDialog.FileName
-        $StatusLabel.Text = "Analisando: $(Split-Path $FilePath -Leaf)..."
-        $StatusLabel.Owner.Refresh()
-
-        $Data = $null
-        try {
-            # Detecta automaticamente o delimitador (vírgula ou ponto e vírgula) com base na primeira linha.
-            $firstLine = Get-Content -Path $FilePath -TotalCount 1
-            $bestDelimiter = if (($firstLine -split ';').Count -gt ($firstLine -split ',').Count) { ';' } else { ',' }
-            $Data = Import-Csv -Path $FilePath -Delimiter $bestDelimiter
-        }
-        catch {
-            # O erro será tratado na verificação de $Data nulo.
-        }
-
-        if ($null -ne $Data -and $Data.Count -gt 0) {
-            # Se os dados forem carregados com sucesso:
-            $Global:OriginalData = [System.Collections.ArrayList]$Data # Salva uma cópia original dos dados.
-            $DataGridView.DataSource = $Global:OriginalData # Vincula os dados à grade.
-            $DataGridView.AutoSizeColumnsMode = 'AllCells'
-            $StatusLabel.Text = "Arquivo carregado: $(Split-Path $FilePath -Leaf) ($($Data.Count) linhas)"
-            $MenuItemsToEnable | ForEach-Object { $_.Enabled = $true } # Ativa os menus de dados e relatório.
-            $Global:IsDataFiltered = $false
-        } else {
-            # Se houver falha na leitura:
-            $DataGridView.DataSource = $null
-            $Global:OriginalData = $null
-            [System.Windows.Forms.MessageBox]::Show("Não foi possível ler os dados do arquivo CSV.", "Erro de Leitura", "OK", "Error")
-            $StatusLabel.Text = "Falha ao carregar arquivo."
-            $MenuItemsToEnable | ForEach-Object { $_.Enabled = $false } # Desativa os menus.
-        }
+    $embeddedContent = [PSCustomObject]@{
+        Tailwind    = ""
+        ChartJS     = ""
+        ChartLabels = ""
     }
-}
-
-# Exibe um diálogo para ordenar os dados na grade por uma coluna específica.
-Function Sort-Data {
-    param($DataGridView, $StatusLabel)
-    
-    $columnNames = Get-ColumnNames -DataGridView $DataGridView
-    if ($columnNames.Count -eq 0) { return }
-
-    # Cria o formulário de diálogo para escolher as opções de ordenação.
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Ordenar Dados"; $form.ClientSize = "300,150"; $form.StartPosition = 'CenterParent'
-    
-    $columnLabel = New-Object System.Windows.Forms.Label; $columnLabel.Text = "Ordenar por coluna:"; $columnLabel.Location = "10,10"; $form.Controls.Add($columnLabel)
-    $columnComboBox = New-Object System.Windows.Forms.ComboBox; $columnComboBox.Location = "10,30"; $columnComboBox.Size = "280,20"; $columnComboBox.Items.AddRange($columnNames); $columnComboBox.SelectedIndex = 0; $form.Controls.Add($columnComboBox)
-    
-    $orderLabel = New-Object System.Windows.Forms.Label; $orderLabel.Text = "Ordem:"; $orderLabel.Location = "10,60"; $form.Controls.Add($orderLabel)
-    $ascRadio = New-Object System.Windows.Forms.RadioButton; $ascRadio.Text = "Crescente"; $ascRadio.Location = "10,80"; $ascRadio.Checked = $true; $form.Controls.Add($ascRadio)
-    $descRadio = New-Object System.Windows.Forms.RadioButton; $descRadio.Text = "Decrescente"; $descRadio.Location = "120,80"; $form.Controls.Add($descRadio)
-    
-    $okButton = New-Object System.Windows.Forms.Button; $okButton.Text = "OK"; $okButton.Location = "130,110"; $okButton.DialogResult = 'OK'; $form.Controls.Add($okButton)
-    $cancelButton = New-Object System.Windows.Forms.Button; $cancelButton.Text = "Cancelar"; $cancelButton.Location = "210,110"; $cancelButton.DialogResult = 'Cancel'; $form.Controls.Add($cancelButton)
-
-    if ($form.ShowDialog() -eq 'OK') {
-        $columnToSort = $columnComboBox.SelectedItem
-        $descending = $descRadio.Checked
-        $currentData = $DataGridView.DataSource
-        
-        # Mapa para ordenar nomes de meses corretamente (ex: Jan, Fev, Mar...).
-        $monthMap = @{
-            'janeiro' = 1; 'jan' = 1; 'fevereiro' = 2; 'fev' = 2; 'março' = 3; 'mar' = 3; 'abril' = 4; 'abr' = 4;
-            'maio' = 5; 'mai' = 5; 'junho' = 6; 'jun' = 6; 'julho' = 7; 'jul' = 7; 'agosto' = 8; 'ago' = 8;
-            'setembro' = 9; 'set' = 9; 'outubro' = 10; 'out' = 10; 'novembro' = 11; 'nov' = 11; 'dezembro' = 12; 'dez' = 12
-        }
-
-        # Bloco de script para "ordenação inteligente".
-        # Ele tenta converter o valor para o tipo mais apropriado antes de comparar.
-        $sortExpression = {
-            param($row)
-            $value = $row."$columnToSort"
-            if ($null -eq $value) { return $null }
-
-            # 1. Tenta converter para número de mês.
-            $valueStr = $value.ToString().ToLower().Trim()
-            if ($monthMap.ContainsKey($valueStr)) { return $monthMap[$valueStr] }
-
-            # 2. Tenta converter para Data/Hora.
-            try { return [datetime]::Parse($value, [System.Globalization.CultureInfo]::CurrentCulture) } catch {}
-            
-            # 3. Tenta converter para número decimal (considerando cultura pt-BR para vírgulas).
-            $decimalValue = 0
-            $ci = [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')
-            if ([decimal]::TryParse($value.ToString(), [System.Globalization.NumberStyles]::Any, $ci, [ref]$decimalValue)) {
-                return $decimalValue
-            }
-
-            # 4. Se tudo falhar, ordena como texto.
-            return $value.ToString()
-        }
-
-        # Aplica a ordenação usando a expressão customizada.
-        $StatusLabel.Text = "Ordenando..."; $StatusLabel.Owner.Refresh()
-        $sortedData = $currentData | Sort-Object -Property @{Expression = $sortExpression} -Descending:$descending
-        $DataGridView.DataSource = [System.Collections.ArrayList]$sortedData
-        $StatusLabel.Text = "Dados ordenados por '$columnToSort'."
-    }
-}
-
-# Adiciona uma nova coluna à grade com base em uma fórmula PowerShell fornecida pelo usuário.
-Function Add-CalculatedColumn {
-    param($DataGridView, $StatusLabel)
-    
-    $newColumnName = Show-InputBox -Title "Adicionar Coluna Calculada" -Prompt "Nome da nova coluna:"
-    if ([string]::IsNullOrWhiteSpace($newColumnName)) { return }
-
-    $columnNames = (Get-ColumnNames -DataGridView $DataGridView) -join "', '"
-    $formula = Show-InputBox -Title "Fórmula da Coluna" -Prompt "Digite a fórmula (ex: `$_.Valor * 1.1`). Colunas: '$columnNames'"
-    if ([string]::IsNullOrWhiteSpace($formula)) { return }
 
     try {
-        # Converte a string da fórmula em um bloco de script executável.
-        $scriptBlock = [scriptblock]::Create($formula)
-        $currentData = $DataGridView.DataSource
+        $wc = New-Object System.Net.WebClient
         
-        $StatusLabel.Text = "Calculando nova coluna..."; $StatusLabel.Owner.Refresh()
-        # Itera sobre cada linha dos dados e aplica a fórmula.
-        foreach ($row in $currentData) {
-            $result = & $scriptBlock -InputObject $row
-            # Adiciona o resultado como uma nova propriedade na linha.
-            Add-Member -InputObject $row -MemberType NoteProperty -Name $newColumnName -Value $result
-        }
+        $tailwindPath = Join-Path $tempDir "tailwindcss.js"
+        if (-not (Test-Path $tailwindPath)) { $wc.DownloadFile($libs.tailwindcss, $tailwindPath) }
+        $embeddedContent.Tailwind = Get-Content -Path $tailwindPath -Raw
 
-        # Força a atualização do DataGridView para mostrar a nova coluna.
-        $DataGridView.DataSource = $null
-        $DataGridView.DataSource = $currentData
-        $DataGridView.AutoSizeColumnsMode = 'AllCells'
-        $StatusLabel.Text = "Coluna '$newColumnName' adicionada."
+        $chartjsPath = Join-Path $tempDir "chart.js"
+        if (-not (Test-Path $chartjsPath)) { $wc.DownloadFile($libs.chartjs, $chartjsPath) }
+        $embeddedContent.ChartJS = Get-Content -Path $chartjsPath -Raw
+
+        $chartlabelsPath = Join-Path $tempDir "chartlabels.js"
+        if (-not (Test-Path $chartlabelsPath)) { $wc.DownloadFile($libs.chartlabels, $chartlabelsPath) }
+        $embeddedContent.ChartLabels = Get-Content -Path $chartlabelsPath -Raw
+        
+        Write-Host "Bibliotecas carregadas com sucesso." -ForegroundColor Green
     }
     catch {
-        [System.Windows.Forms.MessageBox]::Show("Erro na fórmula: $($_.Exception.Message)", "Erro de Sintaxe", "OK", "Error")
-        $StatusLabel.Text = "Falha ao adicionar coluna."
-    }
-}
-
-# Restaura os dados originais, removendo qualquer filtro aplicado.
-Function Remove-DataFilter {
-    param($DataGridView, $StatusLabel)
-
-    if (!$Global:IsDataFiltered) { 
-        $StatusLabel.Text = "Nenhum filtro ativo para remover."
-        return 
+        Write-Error "Falha ao baixar as bibliotecas. Verifique sua conexão com a internet na primeira execução. Erro: $($_.Exception.Message)"
+        exit 1
     }
     
-    $StatusLabel.Text = "Removendo filtro..."; $StatusLabel.Owner.Refresh()
-    $DataGridView.DataSource = $Global:OriginalData
-    $Global:IsDataFiltered = $false
-    $StatusLabel.Text = "Filtro removido. Exibindo todos os $($Global:OriginalData.Count) registros."
+    return $embeddedContent
 }
 
-# --- 5. Funções do Relatório HTML ---
-
-# Gera o arquivo HTML com os dados atuais e o abre no navegador padrão.
-Function Generate-HtmlReport {
-    param(
-        [Parameter(Mandatory=$true)]$DataGridView,
-        [Parameter(Mandatory=$true)]$StatusLabel
-    )
-
-    if ($null -eq $DataGridView.DataSource -or $DataGridView.Rows.Count -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Não há dados carregados para gerar o relatório.", "Aviso", "OK", "Warning")
-        return
-    }
-
-    $StatusLabel.Text = "Gerando relatório HTML..."
-    $StatusLabel.Owner.Refresh()
-
-    # Converte os dados do PowerShell para um formato genérico (PSObject).
-    $DataForJson = $DataGridView.DataSource | ForEach-Object {
-        $properties = @{}
-        foreach ($prop in $_.PSObject.Properties) {
-            $properties[$prop.Name] = $prop.Value
-        }
-        New-Object -TypeName PSObject -Property $properties
-    }
-
-    # Obtém a estrutura das colunas, incluindo nomes renomeados.
-    $ColumnStructure = $DataGridView.Columns | ForEach-Object {
-        [PSCustomObject]@{
-            OriginalName = $_.DataPropertyName
-            DisplayName  = $_.HeaderText
-        }
-    }
-
-    # Serializa os dados e a estrutura de colunas para JSON.
-    $JsonData = $DataForJson | ConvertTo-Json -Compress -Depth 5
-    $JsonColumnStructure = $ColumnStructure | ConvertTo-Json -Compress
-
-    # Gera o conteúdo HTML completo, injetando os dados JSON.
-    $OutputPath = Join-Path $env:TEMP "PowerGraphx_Relatorio.html"
-    $HtmlContent = Get-HtmlTemplate -JsonData $JsonData -JsonColumnStructure $JsonColumnStructure
-    
-    try {
-        # Salva o HTML em um arquivo temporário e o abre.
-        $HtmlContent | Out-File -FilePath $OutputPath -Encoding UTF8
-        Start-Process $OutputPath
-        $StatusLabel.Text = "Relatório gerado e aberto com sucesso!"
-    }
-    catch {
-        [System.Windows.Forms.MessageBox]::Show("Ocorreu um erro ao gerar ou abrir o arquivo HTML: $($_.Exception.Message)", "Erro", "OK", "Error")
-        $StatusLabel.Text = "Falha ao gerar o relatório."
-    }
-}
-
-# Função que contém o template HTML, CSS e JavaScript do relatório.
+# Função que contém o template HTML, CSS e JavaScript da aplicação completa.
 Function Get-HtmlTemplate {
-    param($JsonData, $JsonColumnStructure)
+    param(
+        [Parameter(Mandatory=$true)]$JsonData,
+        [Parameter(Mandatory=$true)]$JsonColumnStructure,
+        [Parameter(Mandatory=$true)]$EmbeddedLibraries
+    )
+    
+    # O JavaScript da aplicação é vasto, então o mantemos aqui.
+    $ApplicationJavaScript = @'
+    // ---------------------------------------------------
+    // Power-Graphx Web App - Lógica Principal
+    // ---------------------------------------------------
+    
+    // Variáveis globais de estado
+    let originalData = [];
+    let currentData = [];
+    let columnStructure = [];
+    let chartInstance;
+    
+    // Mapeamento de estado para ordenação da tabela
+    const sortState = {};
 
-    # A 'here-string' (@"..."@) permite escrever um bloco de texto multilinha.
+    document.addEventListener('DOMContentLoaded', () => {
+        // Inicializa a aplicação com os dados embutidos pelo PowerShell
+        originalData = JSON.parse(document.getElementById('jsonData').textContent);
+        columnStructure = JSON.parse(document.getElementById('jsonColumnStructure').textContent);
+        currentData = [...originalData];
+
+        // Mapeia os nomes originais para os de exibição para uso futuro
+        columnStructure.forEach(col => col.displayName = col.displayName || col.originalName);
+
+        // Renderiza a tabela inicial e configura os eventos
+        renderTable();
+        setupEventListeners();
+        updateStatus();
+    });
+    
+    function updateStatus() {
+        const statusLabel = document.getElementById('status-label');
+        if (statusLabel) {
+            statusLabel.textContent = `Exibindo ${currentData.length} de ${originalData.length} registros.`;
+        }
+    }
+
+    // --- Funções de Renderização da Tabela ---
+    function renderTable() {
+        const tableContainer = document.getElementById('table-container');
+        tableContainer.innerHTML = ''; // Limpa a tabela anterior
+        if (currentData.length === 0) {
+            tableContainer.innerHTML = `<p class="text-center text-gray-500 p-8">Nenhum dado para exibir.</p>`;
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'min-w-full divide-y divide-gray-200';
+        
+        // Cria o cabeçalho
+        const thead = document.createElement('thead');
+        thead.className = 'bg-gray-50';
+        const headerRow = document.createElement('tr');
+        columnStructure.forEach((col, index) => {
+            const th = document.createElement('th');
+            th.scope = 'col';
+            th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none relative group';
+            th.dataset.originalName = col.originalName;
+            
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'flex items-center';
+            titleDiv.textContent = col.displayName;
+            th.appendChild(titleDiv);
+            
+            // Adiciona ícone de ordenação
+            const sortIcon = document.createElement('span');
+            sortIcon.className = 'ml-2 text-gray-400';
+            if (sortState[col.originalName] === 'asc') {
+                sortIcon.innerHTML = '&#9650;'; // Seta para cima
+            } else if (sortState[col.originalName] === 'desc') {
+                sortIcon.innerHTML = '&#9660;'; // Seta para baixo
+            }
+            titleDiv.appendChild(sortIcon);
+
+            th.addEventListener('click', () => handleSort(col.originalName));
+            
+            // Menu de contexto para colunas
+            const menuIcon = document.createElement('span');
+            menuIcon.innerHTML = '&#8942;'; // 3 pontos verticais
+            menuIcon.className = 'absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition p-1 rounded-full hover:bg-gray-200';
+            menuIcon.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showColumnMenu(e.target, col.originalName);
+            });
+            th.appendChild(menuIcon);
+            
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        // Cria o corpo da tabela
+        const tbody = document.createElement('tbody');
+        tbody.className = 'bg-white divide-y divide-gray-200';
+        currentData.forEach((row, rowIndex) => {
+            const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50';
+            columnStructure.forEach(col => {
+                const td = document.createElement('td');
+                td.className = 'px-4 py-3 whitespace-nowrap text-sm text-gray-700';
+                td.textContent = row[col.originalName];
+                td.setAttribute('contenteditable', 'true');
+                td.addEventListener('blur', (e) => {
+                    // Atualiza o dado no array quando a célula perde o foco
+                    const newValue = e.target.textContent;
+                    const originalRow = originalData.find(d => JSON.stringify(d) === JSON.stringify(row));
+                    if(originalRow) {
+                        originalRow[col.originalName] = newValue;
+                    }
+                    currentData[rowIndex][col.originalName] = newValue;
+                });
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        tableContainer.appendChild(table);
+    }
+    
+    // --- Lógica de Manipulação de Dados ---
+
+    function handleSort(columnName) {
+        const currentOrder = sortState[columnName];
+        let nextOrder;
+        if (currentOrder === 'asc') nextOrder = 'desc';
+        else if (currentOrder === 'desc') nextOrder = undefined; // Volta ao original
+        else nextOrder = 'asc';
+
+        // Limpa estados de ordenação anteriores
+        Object.keys(sortState).forEach(key => delete sortState[key]);
+        
+        const originalCopy = [...originalData];
+        if (nextOrder) {
+            sortState[columnName] = nextOrder;
+        }
+
+        // Ordena os dados
+        currentData.sort((a, b) => {
+            if (!nextOrder) {
+                // Se não há ordem, usa a ordem do array original
+                return originalCopy.indexOf(a) - originalCopy.indexOf(b);
+            }
+        
+            const valA = a[columnName];
+            const valB = b[columnName];
+            
+            const numA = parseFloat(String(valA).replace(',', '.'));
+            const numB = parseFloat(String(valB).replace(',', '.'));
+
+            let comparison = 0;
+            if (!isNaN(numA) && !isNaN(numB)) {
+                comparison = numA - numB;
+            } else {
+                comparison = String(valA).toLowerCase().localeCompare(String(valB).toLowerCase());
+            }
+            return nextOrder === 'asc' ? comparison : -comparison;
+        });
+        
+        renderTable();
+    }
+    
+    function showColumnMenu(target, columnName) {
+        // Remove menu existente
+        const existingMenu = document.getElementById('column-context-menu');
+        if (existingMenu) existingMenu.remove();
+
+        const menu = document.createElement('div');
+        menu.id = 'column-context-menu';
+        menu.className = 'absolute z-10 w-48 bg-white rounded-md shadow-lg border';
+        
+        const rect = target.getBoundingClientRect();
+        menu.style.top = `${rect.bottom + window.scrollY}px`;
+        menu.style.left = `${rect.left + window.scrollX}px`;
+
+        menu.innerHTML = `
+            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="rename-col">Renomear</a>
+            <a href="#" class="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" id="remove-col">Remover Coluna</a>
+        `;
+        document.body.appendChild(menu);
+
+        document.getElementById('rename-col').addEventListener('click', (e) => {
+            e.preventDefault();
+            renameColumn(columnName);
+            menu.remove();
+        });
+        document.getElementById('remove-col').addEventListener('click', (e) => {
+            e.preventDefault();
+            removeColumn(columnName);
+            menu.remove();
+        });
+        
+        // Fecha o menu se clicar fora
+        document.addEventListener('click', (e) => {
+             if (!menu.contains(e.target)) {
+                menu.remove();
+             }
+        }, { once: true });
+    }
+    
+    function renameColumn(oldName) {
+        const col = columnStructure.find(c => c.originalName === oldName);
+        const newName = prompt(`Digite o novo nome para a coluna "${col.displayName}":`, col.displayName);
+        if (newName && newName.trim() !== '') {
+            col.displayName = newName.trim();
+            renderTable();
+        }
+    }
+
+    function removeColumn(columnName) {
+        const col = columnStructure.find(c => c.originalName === columnName);
+        if (confirm(`Tem certeza que deseja remover a coluna "${col.displayName}"?`)) {
+            columnStructure = columnStructure.filter(c => c.originalName !== columnName);
+            currentData.forEach(row => delete row[columnName]);
+            originalData.forEach(row => delete row[columnName]);
+            renderTable();
+            updateStatus();
+        }
+    }
+    
+    function addCalculatedColumn() {
+        const newName = prompt("Nome da nova coluna:");
+        if (!newName || newName.trim() === '') return;
+
+        const formula = prompt(`Digite a fórmula. Use 'row' para acessar os dados da linha (ex: row.Valor * 1.1).\nColunas: ${columnStructure.map(c=>c.originalName).join(', ')}`);
+        if (!formula) return;
+        
+        try {
+            const calcFunc = new Function('row', `try { return ${formula}; } catch(e) { return 'ERRO'; }`);
+            
+            currentData.forEach(row => { row[newName] = calcFunc(row); });
+            originalData.forEach(row => { row[newName] = calcFunc(row); });
+
+            columnStructure.push({ originalName: newName, displayName: newName });
+            renderTable();
+            updateStatus();
+        } catch (e) {
+            alert("Erro na fórmula: " + e.message);
+        }
+    }
+    
+    function applyFilter() {
+        const column = document.getElementById('filter-column').value;
+        const condition = document.getElementById('filter-condition').value;
+        const value = document.getElementById('filter-value').value.toLowerCase();
+        
+        if (!column) return;
+
+        currentData = originalData.filter(row => {
+            const cellValue = String(row[column] || '').toLowerCase();
+            const numCellValue = parseFloat(String(row[column]).replace(',', '.'));
+            const numValue = parseFloat(String(value).replace(',', '.'));
+
+            switch (condition) {
+                case 'contains': return cellValue.includes(value);
+                case 'not_contains': return !cellValue.includes(value);
+                case 'equals': return cellValue === value;
+                case 'not_equals': return cellValue !== value;
+                case 'greater': return !isNaN(numCellValue) && !isNaN(numValue) && numCellValue > numValue;
+                case 'less': return !isNaN(numCellValue) && !isNaN(numValue) && numCellValue < numValue;
+                default: return true;
+            }
+        });
+        
+        renderTable();
+        updateStatus();
+        closeModal('filter-modal');
+    }
+
+    function removeFilter() {
+        currentData = [...originalData];
+        Object.keys(sortState).forEach(key => delete sortState[key]); // Limpa ordenação
+        renderTable();
+        updateStatus();
+    }
+    
+    function downloadCSV() {
+        if (currentData.length === 0) return;
+        const headers = columnStructure.map(c => c.displayName);
+        const rows = currentData.map(row => columnStructure.map(col => {
+            let cell = row[col.originalName] === null || row[col.originalName] === undefined ? '' : row[col.originalName];
+            let cellString = String(cell);
+            if (cellString.includes(',') || cellString.includes('"') || cellString.includes('\n')) {
+                cellString = `"${cellString.replace(/"/g, '""')}"`;
+            }
+            return cellString;
+        }).join(','));
+        const csvContent = [headers.join(','), ...rows].join('\n');
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "power-graphx-export.csv";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    function setupEventListeners() {
+        document.getElementById('btn-filter').addEventListener('click', () => showModal('filter-modal'));
+        document.getElementById('btn-add-column').addEventListener('click', addCalculatedColumn);
+        document.getElementById('btn-remove-filter').addEventListener('click', removeFilter);
+        document.getElementById('btn-download-csv').addEventListener('click', downloadCSV);
+        document.getElementById('btn-view-charts').addEventListener('click', () => showModal('charts-modal'));
+        document.getElementById('apply-filter-btn').addEventListener('click', applyFilter);
+        document.querySelectorAll('.modal-close').forEach(el => {
+            el.addEventListener('click', () => closeModal(el.closest('.modal').id));
+        });
+        const filterColumnSelect = document.getElementById('filter-column');
+        columnStructure.forEach(col => {
+            const option = document.createElement('option');
+            option.value = col.originalName;
+            option.textContent = col.displayName;
+            filterColumnSelect.appendChild(option);
+        });
+    }
+
+    function showModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if(modalId === 'charts-modal' && !modal.dataset.initialized) {
+           initializeChartUI();
+           modal.dataset.initialized = 'true';
+        }
+        modal.classList.remove('hidden');
+    }
+
+    function closeModal(modalId) {
+        document.getElementById(modalId).classList.add('hidden');
+    }
+    
+    // --- Lógica dos Gráficos ---
+    function initializeChartUI() {
+        Chart.register(ChartDataLabels);
+        let seriesCounter = 0;
+        const seriesColors = ["#3b82f6", "#ef4444", "#22c55e", "#f97316", "#8b5cf6", "#14b8a6"];
+
+        const isNumeric = (colName) => {
+            const sample = currentData.find(d => d[colName] != null);
+            return sample && !isNaN(parseFloat(String(sample[colName]).replace(',', '.')));
+        };
+
+        const populateSelect = (select, type = 'all') => {
+            select.innerHTML = '';
+            columnStructure.filter(c => type !== 'numeric' || isNumeric(c.originalName)).forEach(col => {
+                select.add(new Option(col.displayName, col.originalName));
+            });
+        };
+
+        const addSeriesControl = (isFirst = false) => {
+            seriesCounter++;
+            const div = document.createElement('div');
+            div.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end';
+            div.innerHTML = `
+                <div><label class="text-xs font-semibold">Eixo X / Grupo:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
+                <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><select name="y-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
+                <div class="combo-type-control hidden"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
+                <div class="flex items-end space-x-2">
+                    <div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="${seriesColors[seriesCounter-1]}" name="color" class="mt-1 w-full h-9 p-0 border-0"></div>
+                    ${!isFirst ? `<button type="button" class="remove-series-btn h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600">&times;</button>` : ''}
+                </div>`;
+            document.getElementById('series-container').appendChild(div);
+            populateSelect(div.querySelector('[name="x-axis"]'), 'all');
+            populateSelect(div.querySelector('[name="y-axis"]'), 'numeric');
+            if (!isFirst) div.querySelector('.remove-series-btn').onclick = (e) => { e.target.closest('div.p-3').remove(); renderChart(); };
+        };
+        
+        const buildChartOptions = () => {
+            const fontColor = '#64748B';
+            const gridColor = 'rgba(0, 0, 0, 0.1)';
+            return {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    datalabels: {
+                        display: document.getElementById('show-labels').checked,
+                        color: fontColor,
+                        font: { size: 12 },
+                        anchor: 'end', align: 'end',
+                        formatter: val => typeof val === 'number' ? val.toLocaleString('pt-BR') : val
+                    }
+                },
+                scales: {
+                    x: { ticks: { color: fontColor }, grid: { color: gridColor } },
+                    y: { beginAtZero: true, ticks: { color: fontColor }, grid: { color: gridColor } }
+                }
+            };
+        };
+
+        window.renderChart = () => {
+             if (chartInstance) chartInstance.destroy();
+             const chartType = document.querySelector('input[name="chart-type"]:checked').value;
+             document.querySelectorAll('.combo-type-control').forEach(el => el.style.display = chartType === 'combo' ? 'block' : 'none');
+
+             const seriesControls = document.querySelectorAll('#series-container > div');
+             if (seriesControls.length === 0) return;
+             
+             const parseValue = v => parseFloat(String(v || '0').replace(',', '.')) || 0;
+             const firstXAxis = seriesControls[0].querySelector('[name="x-axis"]').value;
+             const labels = [...new Set(currentData.map(d => d[firstXAxis]))];
+
+             const datasets = Array.from(seriesControls).map(control => {
+                const yCol = control.querySelector('[name="y-axis"]').value;
+                const xCol = control.querySelector('[name="x-axis"]').value;
+                const seriesTypeOption = control.querySelector('[name="series-type"]').value;
+
+                let seriesType;
+                if (chartType === 'combo') seriesType = seriesTypeOption;
+                else if (chartType === 'line') seriesType = 'line';
+                else seriesType = 'bar'; // for bar, stacked, horizontalBar
+
+                return {
+                    label: columnStructure.find(c => c.originalName === yCol).displayName,
+                    data: labels.map(label => currentData.filter(d => d[xCol] === label).reduce((sum, r) => sum + parseValue(r[yCol]), 0)),
+                    borderColor: control.querySelector('[name="color"]').value,
+                    backgroundColor: control.querySelector('[name="color"]').value + 'B3',
+                    type: seriesType,
+                    tension: 0.4
+                };
+             });
+
+             const options = buildChartOptions();
+             options.indexAxis = chartType === 'horizontalBar' ? 'y' : 'x';
+             options.scales.x.stacked = chartType === 'stacked';
+             options.scales.y.stacked = chartType === 'stacked';
+             
+             chartInstance = new Chart('mainChart', { type: 'bar', data: { labels, datasets }, options });
+        };
+        
+        const downloadChart = () => {
+            if (!chartInstance) { alert('Gere um gráfico para poder baixá-lo.'); return; }
+            const link = document.createElement('a');
+            link.href = chartInstance.toBase64Image('image/png', 1.0);
+            link.download = 'power-graphx-chart.png';
+            link.click();
+        };
+
+        addSeriesControl(true);
+        document.getElementById('charts-controls-panel').addEventListener('change', renderChart);
+        document.getElementById('add-series-btn').addEventListener('click', () => addSeriesControl());
+        document.getElementById('download-chart-btn').addEventListener('click', downloadChart);
+        renderChart();
+    }
+'@
+
+    # O HTML agora inclui a tabela e os modais para interatividade.
+    # As bibliotecas e dados são injetados diretamente.
     return @"
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Power-Graphx - By jeff</title>
-    <!-- Inclusão de bibliotecas externas via CDN -->
-    <script src="https://cdn.tailwindcss.com"></script> <!-- Framework CSS para estilização rápida -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Biblioteca de gráficos -->
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script> <!-- Plugin para rótulos nos gráficos -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
-    <!-- Estilos CSS customizados -->
+    <title>Power-Graphx Web Editor</title>
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); padding: 1.5rem; transition: all 0.3s ease-in-out; }
-        .chart-container { position: relative; width: 100%; height: 650px; }
-        .chart-selector label { border: 2px solid #e5e7eb; border-radius: 0.5rem; padding: 0.5rem; cursor: pointer; transition: all 0.2s ease-in-out; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
-        .chart-selector label:hover { border-color: #9ca3af; background-color: #f9fafb; }
+        .modal { transition: opacity 0.25s ease; }
+        #table-container { max-height: calc(100vh - 140px); overflow: auto; }
+        table thead { position: sticky; top: 0; z-index: 1; }
         .chart-selector input:checked + label { border-color: #3b82f6; background-color: #eff6ff; box-shadow: 0 0 0 2px #3b82f6; }
-        .chart-selector input { display: none; }
-        .divider { border-top: 1px solid #e5e7eb; }
     </style>
+    <script>$($EmbeddedLibraries.Tailwind)</script>
 </head>
-<body class="text-gray-900">
-    <!-- Cabeçalho da página -->
-    <header class="bg-[#0f172a] text-white text-center py-12 px-4">
-        <h1 class="text-4xl md:text-5xl font-black tracking-tight">Relatório Dinâmico Interativo - By jeff</h1>
-        <p class="mt-4 text-lg text-blue-200 max-w-3xl mx-auto">Dados processados via Power-Graphx Editor - By jeff.</p>
-    </header>
-    <!-- Conteúdo principal -->
-    <main class="container mx-auto p-4 md:p-8 -mt-10">
-        <!-- Seção de Controles (Seleção de dados e tipo de gráfico) -->
-        <section id="controls" class="card mb-6">
-              <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6">
-                  <div>
-                      <h2 class="text-xl font-bold text-[#1e293b] mb-4">1. Seleção de Dados</h2>
-                      <div class="mt-4 pt-4 border-t">
-                          <div class="flex justify-between items-center mb-2">
-                              <h3 class="text-lg font-bold text-[#1e293b]">Séries de Dados (Eixos)</h3>
-                              <button id="add-series-btn" class="bg-blue-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-blue-600 transition">+ Adicionar Série</button>
-                          </div>
-                          <div id="series-container" class="space-y-3"></div>
-                      </div>
-                  </div>
-                  <div class="flex flex-col justify-between">
-                      <div>
-                          <h2 class="text-xl font-bold text-[#1e293b] mb-4">2. Escolha o Tipo de Gráfico</h2>
-                          <div class="chart-selector grid grid-cols-3 sm:grid-cols-6 gap-2">
-                              <div><input type="radio" name="chart-type" value="bar" id="type-bar" checked><label for="type-bar"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="text-xs font-semibold">Barra</span></label></div>
-                              <div><input type="radio" name="chart-type" value="combo" id="type-combo"><label for="type-combo"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/><path d="M3 12l5-4 5 6 5-4"/></svg><span class="text-xs font-semibold">Combo</span></label></div>
-                              <div><input type="radio" name="chart-type" value="stacked" id="type-stacked"><label for="type-stacked"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="#3b82f6" stroke="#fff" stroke-width="1"><rect x="5" y="12" width="4" height="6"/><rect x="10" y="8" width="4" height="10"/><rect x="15" y="4" width="4" height="14"/><rect x="5" y="9" width="4" height="3" fill="#ef4444"/><rect x="10" y="4" width="4" height="4" fill="#ef4444"/><rect x="15" y="2" width="4" height="2" fill="#ef4444"/></svg><span class="text-xs font-semibold">Empilhado</span></label></div>
-                              <div><input type="radio" name="chart-type" value="line" id="type-line"><label for="type-line"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M3 17l5-4 5 6 5-4 4 2"/></svg><span class="text-xs font-semibold">Linha</span></label></div>
-                              <div><input type="radio" name="chart-type" value="horizontalBar" id="type-horizontalBar"><label for="type-horizontalBar"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" transform="rotate(90) scale(1,-1)"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="text-xs font-semibold">Horizontal</span></label></div>
-                              <div><input type="radio" name="chart-type" value="stackedLine" id="type-stackedLine"><label for="type-stackedLine"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="#3b82f6" fill-opacity="0.5" stroke="#3b82f6" stroke-width="2"><path d="M3 17l5-4 5 6 5-4 4 2V21H3z"/><path d="M3 12l5-3 5 5 5-3 4 2v5l-4-2-5 3-5-5-5 3z" fill="#ef4444" fill-opacity="0.5" stroke="#ef4444"/></svg><span class="text-xs font-semibold">Linha Emp.</span></label></div>
-                          </div>
-                      </div>
-                      <div class="mt-6"><button id="update-charts-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition hover:bg-blue-700 flex items-center justify-center text-lg">
-                          Atualizar Gráfico
-                      </button></div>
-                  </div>
-              </div>
-        </section>
-        
-        <!-- Grid para o gráfico e o painel de formatação -->
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <!-- Card do Gráfico -->
-            <div id="chart-card" class="lg:col-span-3 card transition-all duration-300">
-                  <div class="flex justify-between items-center mb-4">
-                      <h3 id="chart-title" class="text-xl font-bold text-[#1e293b]"></h3>
-                  </div>
-                  <div class="chart-container"><canvas id="mainChart"></canvas></div>
+<body class="bg-gray-100 font-sans">
+
+    <!-- Dados JSON embutidos -->
+    <script id="jsonData" type="application/json">$JsonData</script>
+    <script id="jsonColumnStructure" type="application/json">$JsonColumnStructure</script>
+
+    <!-- Cabeçalho e Barra de Ferramentas -->
+    <header class="bg-white shadow-md p-4 sticky top-0 z-20">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-800">Power-Graphx Web Editor</h1>
+            <div class="flex items-center space-x-2">
+                <button id="btn-filter" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">Filtrar</button>
+                <button id="btn-add-column" class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">Coluna Calculada</button>
+                <button id="btn-remove-filter" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300">Remover Filtro</button>
+                <button id="btn-view-charts" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">Visualizar Gráficos</button>
+                <button id="btn-download-csv" class="px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded-md hover:bg-gray-900">Baixar CSV</button>
             </div>
-            <!-- Painel de Formatação -->
-            <div id="format-panel" class="lg:col-span-1 card">
-                <h3 class="text-xl font-bold text-[#1e293b] mb-4">Formatar Visual</h3>
-                <div class="space-y-4">
-                    <!-- Opções de Aparência, Rótulos, Barras, Linhas, etc. -->
+        </div>
+    </header>
+
+    <!-- Container da Tabela de Dados -->
+    <main class="container mx-auto p-4">
+        <div id="table-container" class="bg-white rounded-lg shadow overflow-hidden"></div>
+    </main>
+    
+    <!-- Barra de Status -->
+    <footer class="fixed bottom-0 left-0 right-0 bg-gray-800 text-white text-sm p-2 text-center">
+        <span id="status-label">Carregando...</span>
+    </footer>
+
+    <!-- Modal de Filtro -->
+    <div id="filter-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-30">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Filtrar Dados</h3>
+            <div class="space-y-4">
+                <div><label for="filter-column" class="block text-sm font-medium text-gray-700">Coluna</label><select id="filter-column" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm"></select></div>
+                <div><label for="filter-condition" class="block text-sm font-medium text-gray-700">Condição</label><select id="filter-condition" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm"><option value="contains">Contém</option><option value="not_contains">Não Contém</option><option value="equals">Igual a</option><option value="not_equals">Diferente de</option><option value="greater">Maior que (numérico)</option><option value="less">Menor que (numérico)</option></select></div>
+                <div><label for="filter-value" class="block text-sm font-medium text-gray-700">Valor</label><input type="text" id="filter-value" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-2"><button class="modal-close px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button id="apply-filter-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Aplicar</button></div>
+        </div>
+    </div>
+    
+    <!-- Modal de Gráficos -->
+    <div id="charts-modal" class="modal hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-40 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full h-full max-w-7xl flex flex-col p-6 relative">
+            <button class="modal-close absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Visualização de Gráficos</h2>
+            <div class="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 overflow-hidden">
+                <!-- Coluna de Controles -->
+                <div id="charts-controls-panel" class="lg:col-span-1 flex flex-col space-y-4 overflow-y-auto pr-2">
                     <div>
-                        <span class="font-semibold text-gray-700 text-sm">Aparência</span>
-                        <div class="flex items-center mt-2"><input id="dark-mode" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="dark-mode" class="ml-2 block text-sm text-gray-900">Modo Escuro</label></div>
-                    </div>
-                    <div class="divider"></div>
-                    <div>
-                        <span class="font-semibold text-gray-700 text-sm">Rótulos de Dados</span>
-                        <div class="flex items-center mt-2"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-labels" class="ml-2 block text-sm text-gray-900">Exibir rótulos</label></div>
-                        <div id="label-options" class="mt-2 space-y-2 hidden">
-                            <div>
-                                <label for="label-position" class="text-xs text-gray-600">Posição:</label>
-                                <select id="label-position" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
-                                    <option value="top">Topo</option>
-                                    <option value="center">Centro</option>
-                                    <option value="bottom">Base</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label for="label-size" class="text-xs text-gray-600">Tamanho Fonte:</label>
-                                <input type="number" id="label-size" value="12" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
-                            </div>
+                        <h3 class="font-bold text-gray-700 mb-2">1. Tipo de Gráfico</h3>
+                        <div class="chart-selector grid grid-cols-3 gap-2">
+                            <div><input type="radio" name="chart-type" value="bar" id="type-bar" checked class="hidden"><label for="type-bar" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Barra</label></div>
+                            <div><input type="radio" name="chart-type" value="line" id="type-line" class="hidden"><label for="type-line" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Linha</label></div>
+                            <div><input type="radio" name="chart-type" value="combo" id="type-combo" class="hidden"><label for="type-combo" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Combo</label></div>
+                            <div><input type="radio" name="chart-type" value="stacked" id="type-stacked" class="hidden"><label for="type-stacked" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Empilhado</label></div>
+                            <div><input type="radio" name="chart-type" value="horizontalBar" id="type-horizontalBar" class="hidden"><label for="type-horizontalBar" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Horizontal</label></div>
                         </div>
                     </div>
-                    <div class="divider"></div>
-                    <div id="bar-options" class="hidden">
-                        <span class="font-semibold text-gray-700 text-sm">Opções de Barra</span>
-                        <div class="mt-2">
-                             <label for="bar-border-radius" class="text-xs text-gray-600">Arredondamento da Borda:</label>
-                             <input type="number" id="bar-border-radius" value="0" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
-                        </div>
-                        <div class="divider mt-4"></div>
-                    </div>
-                    <div id="line-options" class="hidden">
-                        <span class="font-semibold text-gray-700 text-sm">Opções de Linha</span>
-                        <div class="mt-2">
-                             <label for="line-interpolation" class="text-xs text-gray-600">Interpolação:</label>
-                             <select id="line-interpolation" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
-                                 <option value="0.0">Linear</option>
-                                 <option value="0.4" selected>Suave (Padrão)</option>
-                                 <option value="1.0">Curva Máxima</option>
-                             </select>
-                        </div>
-                        <div class="divider mt-4"></div>
-                    </div>
                     <div>
-                        <span class="font-semibold text-gray-700 text-sm">Linhas de Grade</span>
-                        <div class="flex items-center mt-2"><input id="show-grid" type="checkbox" checked class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-grid" class="ml-2 block text-sm text-gray-900">Exibir grades</label></div>
+                        <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">2. Séries de Dados</h3><button id="add-series-btn" class="text-xs bg-blue-500 text-white py-1 px-2 rounded-full hover:bg-blue-600">+ Série</button></div>
+                        <div id="series-container" class="space-y-3 max-h-60 overflow-y-auto"></div>
                     </div>
-                    <div class="divider"></div>
-                    <div id="y-axis-max-control">
-                        <span class="font-semibold text-gray-700 text-sm">Eixo Y (Primário)</span>
-                        <div class="flex items-center mt-2"><input id="y-axis-auto" type="checkbox" checked class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="y-axis-auto" class="ml-2 block text-sm text-gray-900">Automático</label></div>
-                        <input type="number" id="y-axis-max" placeholder="Ex: 100" disabled class="mt-2 block w-full rounded-md border-gray-300 shadow-sm text-sm disabled:bg-gray-100">
+                </div>
+                <!-- Coluna do Gráfico -->
+                <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4"><div class="relative w-full h-full"><canvas id="mainChart"></canvas></div></div>
+                <!-- Coluna de Formatação e Ações -->
+                <div class="lg:col-span-1 flex flex-col space-y-4 overflow-y-auto pr-2">
+                    <div>
+                        <h3 class="font-bold text-gray-700 mb-2">3. Formatação</h3>
+                        <div class="flex items-center"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-labels" class="ml-2 block text-sm text-gray-900">Exibir rótulos de dados</label></div>
                     </div>
-                    <div class="divider"></div>
-                     <div>
-                        <span class="font-semibold text-gray-700 text-sm">Exportar</span>
-                        <button id="download-chart-btn" class="mt-2 w-full bg-gray-600 text-white font-bold py-2 px-3 rounded-lg text-sm transition hover:bg-gray-700">
-                            Baixar Gráfico (PNG)
-                        </button>
+                    <div class="pt-4 border-t">
+                         <h3 class="font-bold text-gray-700 mb-2">4. Ações</h3>
+                         <button id="download-chart-btn" class="w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700">Baixar Gráfico (PNG)</button>
                     </div>
                 </div>
             </div>
         </div>
-    </main>
-    <script>
-        // --- INÍCIO DO JAVASCRIPT ---
-        // Variáveis globais para o script da página.
-        let chartInstance; // Armazena a instância do gráfico atual para poder atualizá-la ou destruí-la.
-        let seriesCounter = 0; // Contador para dar IDs únicos a cada série de dados adicionada.
-        const seriesColors = ["#3b82f6", "#ef4444", "#22c55e", "#f97316", "#8b5cf6", "#14b8a6"]; // Paleta de cores padrão.
-        
-        // Função principal, executada após o carregamento da página.
-        function initializeApp(rawData, columnStructure) {
-            if (!rawData || !columnStructure) {
-                console.error("Dados ou estrutura de colunas não fornecidos.");
-                return;
-            }
-            // Registra o plugin de rótulos de dados para que o Chart.js possa usá-lo.
-            Chart.register(ChartDataLabels);
+    </div>
 
-            // Tenta converter um valor de texto (do CSV) em um número. Remove caracteres não numéricos.
-            function parseValue(value) {
-                if (typeof value === 'number') return value;
-                if (typeof value !== 'string') return value;
-                const cleanValue = value.replace(/[^0-9,-]/g, '').replace(',', '.');
-                const parsed = parseFloat(cleanValue);
-                return isNaN(parsed) ? value : parsed;
-            }
-            
-            // Verifica se uma coluna contém dados numéricos, analisando uma amostra.
-            function isNumeric(colName) {
-                if (rawData.length === 0) return false;
-                const sampleValue = rawData.find(d => d[colName] !== null && typeof d[colName] !== 'undefined');
-                if (!sampleValue) return false;
-                const parsed = parseFloat(String(sampleValue[colName]).replace(',', '.'));
-                return !isNaN(parsed) && String(sampleValue[colName]).trim() !== '';
-            }
-
-            // Preenche um elemento <select> (dropdown) com os nomes das colunas.
-            function populateSelect(selectElement, type = 'all') {
-                if (!selectElement) return;
-                selectElement.innerHTML = '';
-                const options = columnStructure.filter(col => {
-                    if (type === 'numeric') return isNumeric(col.OriginalName); // Filtra apenas colunas numéricas
-                    if (type === 'text') return !isNumeric(col.OriginalName); // Filtra apenas colunas de texto
-                    return true; // Pega todas as colunas
-                });
-                
-                options.forEach(col => {
-                    const option = document.createElement('option');
-                    option.value = col.OriginalName;
-                    option.textContent = col.DisplayName;
-                    selectElement.appendChild(option);
-                });
-            }
-
-            // Adiciona um novo bloco de controles para uma série de dados na UI.
-            function addSeriesControl(isFirst = false) {
-                const seriesContainer = document.getElementById('series-container');
-                const seriesId = ++seriesCounter;
-                const defaultColor = seriesColors[(seriesId - 1) % seriesColors.length];
-                const seriesDiv = document.createElement('div');
-                seriesDiv.id = 'series-' + seriesId;
-                seriesDiv.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end';
-                
-                // Cria o HTML para os controles da nova série (eixos, tipo, cor).
-                let content = '';
-                const eixoXLabel = isFirst ? 'Eixo X / Grupo:' : 'Eixo X / Grupo ' + seriesId + ':';
-                const eixoYLabel = isFirst ? 'Eixo Y / Valor:' : 'Eixo Y / Valor ' + seriesId + ':';
-                
-                content += '<div class="x-axis-control"><label class="text-xs font-semibold">' + eixoXLabel + '</label><select name="x-axis" class="axis-select mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm"></select></div>';
-                content += '<div><label class="text-xs font-semibold">' + eixoYLabel + '</label><select name="y-axis" class="axis-select mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm y-axis-select"></select></div>';
-                content += '<div class="combo-type-control"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="axis-select mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>';
-                content += '<div class="flex items-end space-x-2"><div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="' + defaultColor + '" name="color" class="axis-select mt-1 w-full h-9"></div>';
-                if (!isFirst) {
-                    content += '<button type="button" onclick="this.parentElement.parentElement.remove(); renderChart();" class="h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600 transition text-sm font-bold">&times;</button>';
-                }
-                content += '</div>';
-
-                seriesDiv.innerHTML = content;
-                seriesContainer.appendChild(seriesDiv);
-                
-                // Preenche os novos dropdowns com as colunas disponíveis.
-                populateSelect(seriesDiv.querySelector('[name="x-axis"]'), 'all');
-                populateSelect(seriesDiv.querySelector('[name="y-axis"]'), 'numeric');
-            }
-
-            // Função principal de renderização do gráfico. É chamada sempre que algo muda.
-            window.renderChart = function() {
-                // Destrói o gráfico anterior para evitar sobreposição e problemas de memória.
-                if (chartInstance) { chartInstance.destroy(); }
-                const container = document.querySelector('.chart-container');
-                container.innerHTML = '<canvas id="mainChart"></canvas>';
-                const ctx = document.getElementById('mainChart').getContext('2d');
-                
-                const chartType = document.querySelector('input[name="chart-type"]:checked').value;
-                const seriesControls = document.querySelectorAll('#series-container > div');
-                if (seriesControls.length === 0) return;
-
-                const chartData = { datasets: [] };
-                
-                // Define os rótulos do eixo X (categorias).
-                const firstXAxisSelect = seriesControls[0] ? seriesControls[0].querySelector('[name="x-axis"]') : null;
-                if (firstXAxisSelect && firstXAxisSelect.value) {
-                     // Pega os valores únicos da coluna do eixo X NA ORDEM EM QUE APARECEM.
-                     // A remoção do .sort() aqui é CRUCIAL para respeitar a ordenação feita no PowerShell.
-                     chartData.labels = [...new Set(rawData.map(d => d[firstXAxisSelect.value]))];
-                }
-                
-                // Itera sobre cada bloco de série de dados para construir os datasets do gráfico.
-                seriesControls.forEach((control) => {
-                    const yColSelect = control.querySelector('[name="y-axis"]');
-                    const xColSelect = control.querySelector('[name="x-axis"]');
-                    const colorInput = control.querySelector('[name="color"]');
-                    const typeSelect = control.querySelector('[name="series-type"]');
-                    
-                    if (!yColSelect || !yColSelect.value || !xColSelect || !xColSelect.value || !colorInput) return;
-                    
-                    const yCol = yColSelect.value;
-                    const xCol = xColSelect.value;
-                    const colInfo = columnStructure.find(c => c.OriginalName === yCol);
-                    if (!colInfo) return;
-                    const lineTension = document.getElementById('line-interpolation').value;
-                    const borderRadius = document.getElementById('bar-border-radius').value;
-
-                    // Monta o objeto de 'dataset' para o Chart.js.
-                    const dataset = {
-                        label: colInfo.DisplayName,
-                        borderColor: colorInput.value,
-                        backgroundColor: colorInput.value + 'B3',
-                    };
-                    
-                    // Define o tipo de gráfico para esta série específica.
-                    let seriesType = (chartType === 'combo' && typeSelect) ? typeSelect.value : (['bar', 'stacked', 'horizontalBar'].includes(chartType) ? 'bar' : chartType);
-                    if(chartType === 'stackedLine') seriesType = 'line';
-                    
-                    if (seriesType === 'line') dataset.tension = parseFloat(lineTension);
-                    if (seriesType === 'bar') dataset.borderRadius = parseInt(borderRadius) || 0;
-                    dataset.type = seriesType;
-
-                    // Processa e agrega os dados. Para cada rótulo no eixo X, soma os valores correspondentes.
-                    dataset.data = chartData.labels.map(label => {
-                        const relevantRows = rawData.filter(d => d[xCol] === label);
-                        if (relevantRows.length === 0) return 0;
-                        const sum = relevantRows.reduce((acc, curr) => acc + (parseValue(curr[yCol]) || 0), 0);
-                        return sum;
-                    });
-                    chartData.datasets.push(dataset);
-                });
-                
-                if (chartData.datasets.length === 0) return;
-                
-                // Cria a nova instância do gráfico com os dados e opções.
-                const finalChartType = ['bar', 'combo', 'stacked', 'horizontalBar'].includes(chartType) ? 'bar' : chartType;
-                const options = buildChartOptions(chartType);
-                chartInstance = new Chart(ctx, { type: finalChartType, data: chartData, options: options });
-            }
-
-            // Constrói o objeto de opções de formatação para o Chart.js.
-            function buildChartOptions(chartType) {
-                // Lê todas as opções do painel de formatação.
-                const darkMode = document.getElementById('dark-mode').checked;
-                const showGrid = document.getElementById('show-grid').checked;
-                const showLabels = document.getElementById('show-labels').checked;
-                const labelPos = document.getElementById('label-position').value;
-                const labelSize = document.getElementById('label-size').value;
-                const yAxisAuto = document.getElementById('y-axis-auto').checked;
-                const yAxisMax = parseFloat(document.getElementById('y-axis-max').value);
-
-                const fontColor = darkMode ? '#E2E8F0' : '#64748B';
-                const gridColor = darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-
-                // Objeto base de opções.
-                const options = {
-                    responsive: true, maintainAspectRatio: false,
-                    animation: {
-                        delay: (context) => { // Adiciona uma animação de delay para um efeito de carregamento.
-                            let delay = 0;
-                            if (context.type === 'data' && context.mode === 'default') {
-                                delay = context.dataIndex * 30 + context.datasetIndex * 100;
-                            }
-                            return delay;
-                        }
-                    },
-                    plugins: { 
-                        legend: { labels: { color: fontColor } },
-                        datalabels: { 
-                            display: showLabels, 
-                            color: fontColor,
-                            font: { size: labelSize || 12 },
-                            align: labelPos === 'bottom' ? 'bottom' : (labelPos === 'center' ? 'center' : 'top'),
-                            anchor: labelPos === 'bottom' ? 'start' : (labelPos === 'center' ? 'center' : 'end'),
-                            formatter: (value, context) => {
-                                return typeof value === 'object' ? (value.y || value.x) : value;
-                            }
-                        }
-                    },
-                    scales: {}
-                };
-                
-                // Configurações específicas para os eixos X e Y.
-                const axisOptions = { grid: { display: showGrid, color: gridColor }, ticks: { color: fontColor } };
-                options.scales.x = { ...axisOptions };
-                options.scales.y = { ...axisOptions, beginAtZero: true };
-
-                if (chartType === 'horizontalBar') options.indexAxis = 'y'; // Inverte os eixos para barra horizontal.
-                if (!yAxisAuto && !isNaN(yAxisMax)) options.scales.y.max = yAxisMax; // Define um máximo manual para o eixo Y.
-                if (chartType === 'stacked' || chartType === 'stackedLine') { // Habilita o empilhamento.
-                    options.scales.x.stacked = true;
-                    options.scales.y.stacked = true;
-                }
-
-                return options;
-            }
-
-            // Atualiza a UI, mostrando/ocultando painéis de opções conforme o tipo de gráfico.
-            function updateUI() {
-                const chartType = document.querySelector('input[name="chart-type"]:checked').value;
-                const isLine = ['line', 'combo', 'stackedLine'].includes(chartType);
-                const isBar = ['bar', 'combo', 'stacked', 'horizontalBar'].includes(chartType);
-
-                document.getElementById('line-options').style.display = isLine ? 'block' : 'none';
-                document.getElementById('bar-options').style.display = isBar ? 'block' : 'none';
-                
-                renderChart();
-            }
-
-            // Gera uma imagem PNG do gráfico e a oferece para download.
-            function downloadChart() {
-                if (!chartInstance) {
-                    alert('Gere um gráfico antes de tentar fazer o download.');
-                    return;
-                }
-                const link = document.createElement('a');
-                link.href = chartInstance.toBase64Image('image/png', 1.0); // Converte o canvas para imagem base64.
-                link.download = 'power-graphx-chart.png';
-                link.click();
-            }
-            
-            // --- Inicialização e Eventos ---
-            // Adiciona o primeiro controle de série e define todos os listeners de eventos.
-            addSeriesControl(true);
-            document.getElementById('controls').addEventListener('change', updateUI);
-            document.getElementById('format-panel').addEventListener('change', renderChart);
-            document.getElementById('add-series-btn').addEventListener('click', () => { addSeriesControl(false); updateUI(); });
-            document.getElementById('update-charts-btn').addEventListener('click', renderChart);
-            document.getElementById('download-chart-btn').addEventListener('click', downloadChart);
-            
-            document.getElementById('show-labels').addEventListener('change', (e) => {
-                document.getElementById('label-options').style.display = e.target.checked ? 'block' : 'none';
-            });
-            document.getElementById('y-axis-auto').addEventListener('change', (e) => {
-                document.getElementById('y-axis-max').disabled = e.target.checked;
-            });
-            
-            updateUI(); // Chama a primeira renderização.
-        }
-
-        // Ponto de entrada do JavaScript: quando o HTML está pronto, a aplicação é inicializada.
-        document.addEventListener('DOMContentLoaded', function() {
-            try {
-                // Os dados injetados pelo PowerShell são usados para iniciar o app.
-                initializeApp($JsonData, $JsonColumnStructure);
-            } catch (e) {
-                console.error("Erro fatal ao inicializar o Power-Graphx:", e);
-                document.body.innerHTML = '<div class="text-center p-8 bg-red-100 text-red-700"><h1>Ocorreu um erro crítico</h1><p>Não foi possível renderizar o relatório. Verifique o console para mais detalhes.</p></div>';
-            }
-        });
-    </script>
+    <!-- Bibliotecas e Lógica da Aplicação -->
+    <script>$($EmbeddedLibraries.ChartJS)</script>
+    <script>$($EmbeddedLibraries.ChartLabels)</script>
+    <script>$ApplicationJavaScript</script>
 </body>
 </html>
 "@
 }
 
+# --- 3. Função Principal de Execução ---
+Function Start-WebApp {
+    $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $OpenFileDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    $OpenFileDialog.Title = "Power-Graphx: Selecione o arquivo CSV"
 
-# --- 6. Construção da Interface Gráfica (Windows Forms) ---
-# Criação do formulário principal da aplicação.
-$Form = New-Object System.Windows.Forms.Form
-$Form.Text = "Power-Graphx Editor 1.7.9"
-$Form.Width = 1200
-$Form.Height = 800
-$Form.StartPosition = "CenterScreen"
-$Form.FormBorderStyle = 'Sizable'
-$Form.WindowState = 'Maximized'
-try { $Form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon("C:\Windows\System32\imageres.dll,25") } catch {}
-
-# --- Menu Principal ---
-$MenuStrip = New-Object System.Windows.Forms.MenuStrip
-$MenuStrip.Dock = "Top"
-
-# Menu Arquivo
-$FileMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Arquivo")
-$MenuLoadCsv = New-Object System.Windows.Forms.ToolStripMenuItem("Carregar CSV...")
-$MenuGenerateHtml = New-Object System.Windows.Forms.ToolStripMenuItem("Gerar e Visualizar Relatório")
-$MenuGenerateHtml.Enabled = $false
-$MenuExit = New-Object System.Windows.Forms.ToolStripMenuItem("Sair")
-$FileMenu.DropDownItems.AddRange(@($MenuLoadCsv, $MenuGenerateHtml, (New-Object System.Windows.Forms.ToolStripSeparator), $MenuExit))
-
-# Menu Editar
-$EditMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Editar")
-$MenuFind = New-Object System.Windows.Forms.ToolStripMenuItem("Localizar... (Ctrl+F)")
-$EditMenu.DropDownItems.Add($MenuFind)
-
-# Menu Dados
-$DataMenu = New-Object System.Windows.Forms.ToolStripMenuItem("Dados")
-$DataMenu.Enabled = $false
-$MenuSort = New-Object System.Windows.Forms.ToolStripMenuItem("Ordenar Coluna...")
-$MenuFilter = New-Object System.Windows.Forms.ToolStripMenuItem("Filtrar Dados...")
-$MenuRemoveFilter = New-Object System.Windows.Forms.ToolStripMenuItem("Remover Filtro")
-$MenuCalculatedColumn = New-Object System.Windows.Forms.ToolStripMenuItem("Adicionar Coluna Calculada...")
-$MenuRemoveColumn = New-Object System.Windows.Forms.ToolStripMenuItem("Remover Coluna...")
-$DataMenu.DropDownItems.AddRange(@($MenuSort, $MenuFilter, $MenuRemoveFilter, (New-Object System.Windows.Forms.ToolStripSeparator), $MenuCalculatedColumn, $MenuRemoveColumn))
-
-$MenuStrip.Items.AddRange(@($FileMenu, $EditMenu, $DataMenu))
-$Form.Controls.Add($MenuStrip)
-
-
-# --- Painel de Status ---
-$StatusStrip = New-Object System.Windows.Forms.StatusStrip
-$StatusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel("Aguardando arquivo CSV...")
-$StatusStrip.Items.Add($StatusLabel)
-$Form.Controls.Add($StatusStrip)
-
-
-# --- Painel Principal ---
-$MainPanel = New-Object System.Windows.Forms.Panel
-$MainPanel.Dock = "Fill"
-$Form.Controls.Add($MainPanel)
-
-
-# --- Layout Principal dentro do Painel ---
-$MainLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$MainLayout.Dock = "Fill"
-$MainLayout.ColumnCount = 1
-$MainLayout.RowCount = 2
-$MainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 35)))
-$MainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-$MainPanel.Controls.Add($MainLayout)
-
-# --- Painel de Busca ---
-$SearchPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$SearchPanel.Dock = "Fill"
-$SearchPanel.BackColor = [System.Drawing.Color]::FromArgb(220, 225, 230)
-$SearchPanel.Visible = $false
-$SearchPanel.Padding = 5
-$MainLayout.Controls.Add($SearchPanel, 0, 0)
-
-$SearchLabel = New-Object System.Windows.Forms.Label; $SearchLabel.Text = "Buscar:"; $SearchLabel.Font = "Segoe UI, 9"; $SearchLabel.Margin = "0,3,0,0"; $SearchPanel.Controls.Add($SearchLabel)
-$SearchTextBox = New-Object System.Windows.Forms.TextBox; $SearchTextBox.Size = New-Object System.Drawing.Size(250, 23); $SearchPanel.Controls.Add($SearchTextBox)
-$SearchButton = New-Object System.Windows.Forms.Button; $SearchButton.Text = "Buscar"; $SearchButton.Size = New-Object System.Drawing.Size(75, 25); $SearchPanel.Controls.Add($SearchButton)
-$CloseSearchButton = New-Object System.Windows.Forms.Button; $CloseSearchButton.Text = "Fechar"; $CloseSearchButton.Size = New-Object System.Drawing.Size(75, 25); $SearchPanel.Controls.Add($CloseSearchButton)
-$SearchResultLabel = New-Object System.Windows.Forms.Label; $SearchResultLabel.Text = ""; $SearchResultLabel.Font = "Segoe UI, 9"; $SearchResultLabel.Margin = "10,3,0,0"; $SearchPanel.Controls.Add($SearchResultLabel)
-
-# --- Data Grid View (Grade de Dados) ---
-$DataGridView = New-Object System.Windows.Forms.DataGridView
-$DataGridView.Dock = "Fill"
-$DataGridView.BackgroundColor = [System.Drawing.Color]::White
-$DataGridView.BorderStyle = "None"
-$DataGridView.ColumnHeadersDefaultCellStyle.Font = "Segoe UI, 9, Bold"
-$DataGridView.ReadOnly = $true
-$DataGridView.AllowUserToAddRows = $false
-$MainLayout.Controls.Add($DataGridView, 0, 1)
-
-# --- Menu de Contexto (Clique com o botão direito na coluna) ---
-$ContextMenu = New-Object System.Windows.Forms.ContextMenuStrip
-$RenameMenuItem = $ContextMenu.Items.Add("Renomear Coluna...")
-$RemoveContextMenuItem = $ContextMenu.Items.Add("Remover Coluna")
-
-
-# --- 7. Eventos ---
-# Define o que acontece quando cada item de menu ou botão é clicado.
-
-$MenuLoadCsv.Add_Click({
-    Load-CSVData -DataGridView $DataGridView -StatusLabel $StatusLabel -MenuItemsToEnable @($MenuGenerateHtml, $DataMenu)
-})
-
-$MenuGenerateHtml.Add_Click({
-    Generate-HtmlReport -DataGridView $DataGridView -StatusLabel $StatusLabel
-})
-
-$MenuExit.Add_Click({ $Form.Close() })
-
-$MenuFind.Add_Click({
-    $SearchPanel.Visible = !$SearchPanel.Visible
-    if ($SearchPanel.Visible) { $SearchTextBox.Focus() }
-})
-
-$MenuSort.Add_Click({ Sort-Data -DataGridView $DataGridView -StatusLabel $StatusLabel })
-
-$MenuCalculatedColumn.Add_Click({ Add-CalculatedColumn -DataGridView $DataGridView -StatusLabel $StatusLabel })
-
-$MenuRemoveFilter.Add_Click({ Remove-DataFilter -DataGridView $DataGridView -StatusLabel $StatusLabel })
-
-# Evento para o clique com o botão direito no cabeçalho de uma coluna.
-$DataGridView.Add_ColumnHeaderMouseClick({
-    param($sender, $e)
-    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right) {
-        $Global:ColumnToModifyIndex = $e.ColumnIndex # Guarda o índice da coluna clicada.
-        $ContextMenu.Show($DataGridView, $DataGridView.PointToClient([System.Windows.Forms.Cursor]::Position)) # Mostra o menu de contexto.
-    }
-})
-
-# Evento para renomear a coluna selecionada.
-$RenameMenuItem.Add_Click({
-    if ($Global:ColumnToModifyIndex -ge 0) {
-        $column = $DataGridView.Columns[$Global:ColumnToModifyIndex]
-        $newName = Show-InputBox -Title "Renomear Coluna" -Prompt "Digite o novo nome para a coluna '$($column.HeaderText)':'" -DefaultText $column.HeaderText
-        if ($newName) {
-            $column.HeaderText = $newName # Altera o texto do cabeçalho.
-        }
-    }
-})
-
-# Evento para remover a coluna selecionada.
-$RemoveContextMenuItem.Add_Click({
-    if ($Global:ColumnToModifyIndex -ge 0) {
-        $columnToRemove = $DataGridView.Columns[$Global:ColumnToModifyIndex].DataPropertyName
-        $currentData = [System.Collections.ArrayList]$DataGridView.DataSource
+    if ($OpenFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $FilePath = $OpenFileDialog.FileName
+        Write-Host "Analisando: $(Split-Path $FilePath -Leaf)..."
         
-        $StatusLabel.Text = "Removendo coluna..."; $StatusLabel.Owner.Refresh()
-
-        # Usa Select-Object para criar uma nova lista de objetos sem a propriedade da coluna a ser removida.
-        $newData = $currentData | Select-Object * -ExcludeProperty $columnToRemove
-        
-        # Re-vincula os dados à grade para refletir a remoção.
-        $DataGridView.DataSource = $null
-        $DataGridView.DataSource = [System.Collections.ArrayList]$newData
-        
-        # Atualiza também a cópia original dos dados se necessário.
-        if ($Global:IsDataFiltered) {
-             $Global:OriginalData = [System.Collections.ArrayList]($Global:OriginalData | Select-Object * -ExcludeProperty $columnToRemove)
-        } else {
-             $Global:OriginalData = $DataGridView.DataSource
+        try {
+            # Detecta o delimitador e importa os dados
+            $firstLine = Get-Content -Path $FilePath -TotalCount 1 -Encoding Default
+            $bestDelimiter = if (($firstLine -split ';').Count -gt ($firstLine -split ',').Count) { ';' } else { ',' }
+            $Data = Import-Csv -Path $FilePath -Delimiter $bestDelimiter
+        } catch {
+            [System.Windows.Forms.MessageBox]::Show("Não foi possível ler os dados do arquivo CSV.", "Erro de Leitura", "OK", "Error")
+            return
         }
 
-        $StatusLabel.Text = "Coluna '$columnToRemove' removida."
-    }
-})
-
-# Evento global de pressionamento de tecla no formulário (para atalhos).
-$Form.Add_KeyDown({
-    param($sender, $e)
-    if ($e.Control -and $e.KeyCode -eq 'F') { # Atalho Ctrl+F
-        $e.SuppressKeyPress = $true # Impede o som de "bip" do Windows.
-        $SearchPanel.Visible = !$SearchPanel.Visible
-        if ($SearchPanel.Visible) { $SearchTextBox.Focus() }
-    }
-})
-
-$CloseSearchButton.Add_Click({ $SearchPanel.Visible = $false })
-
-# Evento do botão de busca.
-$SearchButton.Add_Click({
-    $searchTerm = $SearchTextBox.Text.ToLower()
-    if ([string]::IsNullOrWhiteSpace($searchTerm)) { return }
-
-    $DataGridView.ClearSelection()
-    # Define estilos para células normais e células destacadas.
-    $defaultCellStyle = New-Object System.Windows.Forms.DataGridViewCellStyle
-    $highlightCellStyle = New-Object System.Windows.Forms.DataGridViewCellStyle
-    $highlightCellStyle.BackColor = [System.Drawing.Color]::Yellow
-
-    $foundCount = 0
-    # Itera sobre todas as células da grade.
-    foreach ($row in $DataGridView.Rows) {
-        foreach ($cell in $row.Cells) {
-            $cell.Style = $defaultCellStyle # Reseta o estilo da célula.
-            # Se a célula contiver o termo de busca, aplica o estilo de destaque.
-            if ($cell.Value -and $cell.Value.ToString().ToLower().Contains($searchTerm)) {
-                $cell.Style = $highlightCellStyle
-                $foundCount++
+        if ($null -eq $Data -or $Data.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("O arquivo CSV está vazio ou em um formato inválido.", "Erro de Leitura", "OK", "Error")
+            return
+        }
+        
+        Write-Host "Dados carregados. Preparando a aplicação web..."
+        
+        # Estrutura das Colunas
+        $ColumnStructure = $Data[0].PSObject.Properties | ForEach-Object {
+            [PSCustomObject]@{
+                originalName = $_.Name
+                displayName  = $_.Name
             }
         }
+        
+        # Converte para JSON
+        $JsonData = $Data | ConvertTo-Json -Compress -Depth 10
+        $JsonColumnStructure = $ColumnStructure | ConvertTo-Json -Compress
+
+        # Carrega as bibliotecas (baixa se necessário)
+        $embeddedLibs = Get-EmbeddedLibraries
+        
+        # Gera o conteúdo HTML completo
+        $HtmlContent = Get-HtmlTemplate -JsonData $JsonData -JsonColumnStructure $JsonColumnStructure -EmbeddedLibraries $embeddedLibs
+        
+        # Salva e abre o arquivo HTML
+        $OutputPath = Join-Path $env:TEMP "PowerGraphx_WebApp.html"
+        try {
+            $HtmlContent | Out-File -FilePath $OutputPath -Encoding UTF8
+            Write-Host "Aplicação gerada com sucesso! Abrindo no seu navegador..." -ForegroundColor Green
+            Start-Process $OutputPath
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Ocorreu um erro ao gerar ou abrir o arquivo HTML: $($_.Exception.Message)", "Erro", "OK", "Error")
+        }
     }
-    $SearchResultLabel.Text = "$foundCount ocorrência(s) encontrada(s)."
-})
+}
 
-
-# --- 8. Exibir a Janela ---
-# Inicia a aplicação, exibindo o formulário e entrando no loop de eventos.
-$Form.ShowDialog() | Out-Null
+# --- 4. Iniciar a Aplicação ---
+Start-WebApp
 
