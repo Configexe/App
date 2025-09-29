@@ -1,162 +1,571 @@
 # -----------------------------------------------------------------------------
-# Power-Graphx Editor: Análise e Visualização de Dados
-# Versão: 17.4 - Edição Final com Formatação Completa
-# Autor: Seu Nome/Empresa
-# Descrição: Adiciona controles avançados para rótulos de dados (posição,
-#            tamanho), controle manual da escala do Eixo Y e reintroduz o
-#            gráfico de Barras Empilhadas.
+# Power-Graphx Web App Launcher
+# Versão: 4.5.1 - Correção de Sintaxe do PowerShell
+# Autor: jefferson/configexe (com modernização por IA)
+#
+# Melhorias da Versão 4.5.1:
+# - CORREÇÃO DE BUG: Corrigido um erro de sintaxe no PowerShell (`[Parameter((...)]`)
+#   que impedia a execução do script.
+# - Otimizações de código que resultaram em um arquivo ligeiramente menor,
+#   sem perda de nenhuma funcionalidade.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
 try {
     Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Web # Para codificação de JavaScript
 }
 catch {
-    Write-Error "Não foi possível carregar as assemblies necessárias."
+    Write-Error "Não foi possível carregar as assemblies .NET necessárias."
     exit 1
 }
 
-# --- 2. Funções Auxiliares ---
+# --- 2. Funções Principais ---
 
-Function Show-InputBox {
-    param(
-        [string]$Title,
-        [string]$Prompt,
-        [string]$DefaultText = ""
-    )
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = $Title
-    $form.Font = 'Segoe UI, 9'
-    $form.StartPosition = 'CenterScreen'
-    $form.ClientSize = New-Object System.Drawing.Size(350, 120)
-    $form.FormBorderStyle = 'FixedDialog'
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
-
-    $label = New-Object System.Windows.Forms.Label
-    $label.Text = $Prompt
-    $label.Location = New-Object System.Drawing.Point(10, 15)
-    $label.AutoSize = $true
-    $form.Controls.Add($label)
-
-    $textBox = New-Object System.Windows.Forms.TextBox
-    $textBox.Text = $DefaultText
-    $textBox.Location = New-Object System.Drawing.Point(12, 40)
-    $textBox.Size = New-Object System.Drawing.Size(326, 23)
-    $form.Controls.Add($textBox)
-
-    $okButton = New-Object System.Windows.Forms.Button
-    $okButton.Text = "OK"
-    $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $okButton.Location = New-Object System.Drawing.Point(182, 75)
-    $form.Controls.Add($okButton)
-    $form.AcceptButton = $okButton
-
-    $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = "Cancelar"
-    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $cancelButton.Location = New-Object System.Drawing.Point(263, 75)
-    $form.Controls.Add($cancelButton)
-    $form.CancelButton = $cancelButton
-
-    if ($form.ShowDialog() -eq 'OK') {
-        return $textBox.Text
+# Função para fornecer URLs de CDN com segurança aprimorada (SRI).
+Function Get-CdnLibraryTags {
+    # Subresource Integrity (SRI) garante que os arquivos de bibliotecas baixados
+    # de um CDN não foram adulterados. Os hashes foram corrigidos para os valores corretos.
+    $libs = @{
+        "tailwindcss" = "<script src=`"https://cdn.tailwindcss.com`"></script>";
+        "chartjs"     = "<script src=`"https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js`" integrity=`"sha384-e6cc9LaIG7xZ3XD5B+jtr1NhTWPQGQdRCh6xiZ+ZFUtWCpg4ycv3Sh+SkZoopvUY`" crossorigin=`"anonymous`"></script>";
+        "chartlabels" = "<script src=`"https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js`" integrity=`"sha384-y49Zu59jZHJL/PLKgZPv3k2WI9c0Yp3pWB76V8OBVCb0QBKS8l4Ff3YslzHVX76Y`" crossorigin=`"anonymous`"></script>";
+        "alasql"      = "<script src=`"https://cdn.jsdelivr.net/npm/alasql@4.1.2/dist/alasql.min.js`" integrity=`"sha384-jJv67p3ipYhUXBEyC6HHwcdBifwMunNP2pOiuY2/6Hme7elFehskJ7cT2tfsKhJC`" crossorigin=`"anonymous`"></script>"
     }
-    return $null
+    return $libs.Values -join "`n    "
 }
 
 
-# --- 3. Funções Principais ---
-
-Function Load-CSVData {
-    param(
-        [Parameter(Mandatory=$true)]$DataGridView,
-        [Parameter(Mandatory=$true)]$StatusLabel,
-        [Parameter(Mandatory=$true)]$GenerateButton
-    )
-
-    $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
-    $OpenFileDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
-    $OpenFileDialog.Title = "Selecione o arquivo CSV"
-
-    if ($OpenFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        $FilePath = $OpenFileDialog.FileName
-        $StatusLabel.Text = "Analisando: $(Split-Path $FilePath -Leaf)..."
-        $StatusLabel.Refresh()
-
-        $Data = $null
-        try {
-            $firstLine = Get-Content -Path $FilePath -TotalCount 1
-            $bestDelimiter = if (($firstLine -split ';').Count -gt ($firstLine -split ',').Count) { ';' } else { ',' }
-            $Data = Import-Csv -Path $FilePath -Delimiter $bestDelimiter
-        }
-        catch {
-            # O erro será tratado abaixo
-        }
-
-        if ($null -ne $Data -and $Data.Count -gt 0) {
-            $DataGridView.DataSource = [System.Collections.ArrayList]$Data
-            $DataGridView.AutoSizeColumnsMode = 'AllCells'
-            $StatusLabel.Text = "Arquivo carregado: $(Split-Path $FilePath -Leaf)"
-            $GenerateButton.Enabled = $true
-        } else {
-            $DataGridView.DataSource = $null
-            [System.Windows.Forms.MessageBox]::Show("Não foi possível ler os dados do arquivo CSV.", "Erro de Leitura", "OK", "Error")
-            $StatusLabel.Text = "Falha ao carregar arquivo."
-            $GenerateButton.Enabled = $false
-        }
-    }
-}
-
-Function Generate-HtmlReport {
-    param(
-        [Parameter(Mandatory=$true)]$DataGridView,
-        [Parameter(Mandatory=$true)]$StatusLabel
-    )
-
-    if ($null -eq $DataGridView.DataSource -or $DataGridView.Rows.Count -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Não há dados carregados para gerar o relatório.", "Aviso", "OK", "Warning")
-        return
-    }
-
-    $StatusLabel.Text = "Gerando relatório HTML..."
-    $StatusLabel.Refresh()
-
-    $DataForJson = $DataGridView.DataSource | ForEach-Object {
-        $properties = @{}
-        foreach ($prop in $_.PSObject.Properties) {
-            $properties[$prop.Name] = $prop.Value
-        }
-        New-Object -TypeName PSObject -Property $properties
-    }
-
-    $ColumnStructure = $DataGridView.Columns | ForEach-Object {
-        [PSCustomObject]@{
-            OriginalName = $_.DataPropertyName
-            DisplayName  = $_.HeaderText
-        }
-    }
-
-    $JsonData = $DataForJson | ConvertTo-Json -Compress -Depth 5
-    $JsonColumnStructure = $ColumnStructure | ConvertTo-Json -Compress
-
-    $OutputPath = Join-Path $env:TEMP "PowerGraphx_Relatorio.html"
-    $HtmlContent = Get-HtmlTemplate -JsonData $JsonData -JsonColumnStructure $JsonColumnStructure
-    
-    try {
-        $HtmlContent | Out-File -FilePath $OutputPath -Encoding UTF8
-        Start-Process $OutputPath
-        $StatusLabel.Text = "Relatório gerado e aberto com sucesso!"
-    }
-    catch {
-        [System.Windows.Forms.MessageBox]::Show("Ocorreu um erro ao gerar ou abrir o arquivo HTML: $($_.Exception.Message)", "Erro", "OK", "Error")
-        $StatusLabel.Text = "Falha ao gerar o relatório."
-    }
-}
-
+# Função que contém o template HTML, CSS e JavaScript da aplicação completa.
 Function Get-HtmlTemplate {
-    param($JsonData, $JsonColumnStructure)
+    param(
+        [Parameter(Mandatory=$true)]$JsonData,
+        [Parameter(Mandatory=$true)]$JsonColumnStructure,
+        [Parameter(Mandatory=$true)]$CdnLibraryTags
+    )
+    
+    $ApplicationJavaScript = @'
+    // ---------------------------------------------------
+    // Power-Graphx Web App - Lógica Principal (v4.5.1 com Unpivot por Gráfico)
+    // ---------------------------------------------------
+    
+    // Variáveis globais
+    let originalData = [];
+    let currentData = [];
+    let columnStructure = [];
+    let chartInstances = {};
+    let chartAnalysisCounter = 0;
+    const initialTableName = 'source_data';
+    const sortState = {};
+    let chartTransformedData = {}; // Armazena dados transformados por gráfico
+
+    // Ponto de entrada mais seguro
+    window.onload = () => {
+        try {
+            Chart.register(ChartDataLabels);
+            initializeApp();
+        } catch (e) {
+            console.error("Falha crítica na inicialização:", e);
+            const statusLabel = document.getElementById('status-label');
+            if (statusLabel) statusLabel.textContent = `Erro ao carregar a aplicação. Pressione F12 para ver detalhes.`;
+            alert(`Ocorreu um erro ao carregar a aplicação. Pressione F12 para ver o console de erros.`);
+        }
+    };
+
+    function initializeApp() {
+        originalData = JSON.parse(document.getElementById('jsonData').textContent);
+        let initialColumnStructure = JSON.parse(document.getElementById('jsonColumnStructure').textContent);
+        currentData = JSON.parse(JSON.stringify(originalData)); 
+        
+        updateColumnStructure(initialColumnStructure);
+        setupEventListeners();
+        
+        initializeDB();
+        renderTable();
+        updateStatus();
+    }
+    
+    function initializeDB() {
+        alasql.tables[initialTableName] = { data: originalData };
+        updateTableListUI();
+        document.getElementById('sql-status').textContent = 'Motor SQL (AlaSQL) pronto.';
+    }
+    
+    function updateTableListUI() {
+        const tables = Object.keys(alasql.tables);
+        const listEl = document.getElementById('table-list');
+        listEl.innerHTML = '';
+        if (tables.length > 0) {
+            tables.forEach(tableName => {
+                const li = document.createElement('li');
+                li.textContent = tableName;
+                listEl.appendChild(li);
+            });
+        } else {
+            listEl.innerHTML = '<li>Nenhuma tabela carregada.</li>';
+        }
+
+        document.querySelectorAll('.chart-data-source').forEach(select => {
+            const currentVal = select.value;
+            select.innerHTML = '';
+            tables.forEach(t => select.add(new Option(t, t)));
+            select.value = tables.includes(currentVal) ? currentVal : tables[0];
+            select.dispatchEvent(new Event('change'));
+        });
+    }
+
+    function handleFileUploads(event) {
+        const files = event.target.files;
+        if (!files.length) return;
+        const statusEl = document.getElementById('sql-status');
+        
+        Array.from(files).forEach(file => {
+            let tableName = prompt(`Digite o nome para a tabela do arquivo "${file.name}":`, file.name.split('.')[0].replace(/[^a-zA-Z0-9_]/g, '_'));
+            if (!tableName) return;
+            tableName = tableName.replace(/[^a-zA-Z0-9_]/g, '_');
+            statusEl.textContent = `Lendo arquivo ${file.name}...`;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const fileContent = e.target.result;
+                try {
+                    statusEl.textContent = `Processando "${tableName}" com AlaSQL...`;
+                    let data = alasql('SELECT * FROM CSV(?, {headers:true, separator:";"})', [fileContent]);
+                    if (data.length > 0 && Object.keys(data[0]).length <= 1) {
+                        const dataComma = alasql('SELECT * FROM CSV(?, {headers:true, separator:","})', [fileContent]);
+                        if (dataComma.length > 0 && Object.keys(dataComma[0]).length > 1) { data = dataComma; }
+                    }
+                    alasql.tables[tableName] = { data: data };
+                    statusEl.textContent = `Tabela "${tableName}" criada com sucesso.`;
+                    updateTableListUI();
+                } catch(err) {
+                    statusEl.textContent = `Erro ao carregar a tabela "${tableName}": ${err.message}`;
+                    console.error(err);
+                }
+            };
+            reader.readAsText(file);
+        });
+        event.target.value = '';
+    }
+
+    function runQueryAndUpdateUI() {
+        const query = document.getElementById('sql-editor').value;
+        if (!query.trim()) return;
+        const statusEl = document.getElementById('sql-status');
+        try {
+            statusEl.textContent = 'Executando consulta...';
+            const resultData = alasql(query);
+            if (Array.isArray(resultData) && resultData.length > 0) {
+                const newColumns = Object.keys(resultData[0]).map(name => ({ originalName: name, displayName: name }));
+                updateColumnStructure(newColumns);
+                currentData = resultData;
+                statusEl.textContent = `Consulta executada com sucesso. ${resultData.length} linhas retornadas.`;
+            } else if (Array.isArray(resultData)) {
+                 currentData = [];
+                 updateColumnStructure([]);
+                 statusEl.textContent = 'Consulta executada, mas não retornou linhas.';
+            } else {
+                updateTableListUI();
+                statusEl.textContent = `Consulta executada com sucesso. Verifique a lista de tabelas.`;
+                currentData = [];
+                updateColumnStructure([]);
+            }
+            Object.keys(sortState).forEach(key => delete sortState[key]);
+            renderTable();
+            updateStatus();
+            document.querySelectorAll('.chart-analysis-section').forEach(section => renderChart(section.dataset.id));
+        } catch (e) {
+            statusEl.textContent = `Erro na consulta SQL: ${e.message}`;
+            console.error(e);
+        }
+    }
+
+    function addChartAnalysis() {
+        chartAnalysisCounter++;
+        const template = document.getElementById('chart-analysis-template').innerHTML;
+        const newChartHtml = template.replace(/__ID__/g, chartAnalysisCounter);
+        const container = document.getElementById('charts-container');
+        const div = document.createElement('div');
+        div.innerHTML = newChartHtml;
+        container.appendChild(div.firstElementChild);
+        initializeChartUI(chartAnalysisCounter);
+    }
+
+    function removeChartAnalysis(id) {
+        const section = document.getElementById(`chart-section-${id}`);
+        if (section) section.remove();
+        if (chartInstances[id]) {
+            chartInstances[id].destroy();
+            delete chartInstances[id];
+        }
+        if (chartTransformedData[id]) {
+            delete chartTransformedData[id];
+        }
+    }
+
+    async function showUnpivotHelperForChart(chartId) {
+        const section = document.getElementById(`chart-section-${chartId}`);
+        if (!section) return;
+        const dataSourceSelect = section.querySelector('.chart-data-source');
+        const tableName = dataSourceSelect.value;
+        if (!tableName || !alasql.tables[tableName]) {
+            alert("Selecione uma fonte de dados válida primeiro.");
+            return;
+        }
+        const tableData = alasql.tables[tableName].data;
+        if (tableData.length === 0) { alert("A tabela selecionada está vazia."); return; }
+        const columns = Object.keys(tableData[0]);
+        const idColumnsStr = prompt("Digite as colunas que devem ser MANTIDAS (separadas por vírgula).\n\nEx: ID, Produto\n\nColunas disponíveis: " + columns.join(', '));
+        if (idColumnsStr === null) return;
+        const idColumns = idColumnsStr.split(',').map(c => c.trim()).filter(c => columns.includes(c) && c);
+        const pivotColumns = columns.filter(c => !idColumns.includes(c));
+        const categoryColName = prompt("Qual o nome da nova coluna para as categorias (ex: Mes)?", "Categoria");
+        if (!categoryColName) return;
+        const valueColName = prompt("Qual o nome da nova coluna para os valores (ex: Vendas)?", "Valor");
+        if (!valueColName) return;
+        const idColumnsQuoted = idColumns.map(c => `\`${c}\``);
+        const idColumnSelector = idColumns.length > 0 ? idColumnsQuoted.join(', ') + ',' : '';
+        const selectClauses = pivotColumns.map(pCol => `SELECT ${idColumnSelector} '${pCol}' AS \`${categoryColName}\`, \`${pCol}\` AS \`${valueColName}\` FROM \`${tableName}\``);
+        const fullQuery = `SELECT * FROM (${selectClauses.join(' UNION ALL ')})`;
+
+        try {
+            const resultData = alasql(fullQuery);
+            if (resultData && resultData.length > 0) {
+                chartTransformedData[chartId] = resultData;
+                const transformControls = document.getElementById(`data-transform-controls-${chartId}`);
+                transformControls.innerHTML = `<p class="text-xs text-indigo-700 bg-indigo-100 p-2 rounded-md text-center">Dados Transformados</p>
+                                             <button type="button" class="reset-transform-btn text-xs bg-gray-500 text-white py-1 px-2 rounded-md hover:bg-gray-600 w-full mt-1">Restaurar Original</button>`;
+                transformControls.querySelector('.reset-transform-btn').addEventListener('click', () => {
+                     delete chartTransformedData[chartId];
+                     transformControls.innerHTML = `<button type="button" class="unpivot-chart-data-btn text-xs bg-indigo-600 text-white py-1 px-2 rounded-md hover:bg-indigo-700 w-full">Transformar Dados (Unpivot)</button>`;
+                     transformControls.querySelector('.unpivot-chart-data-btn').addEventListener('click', () => showUnpivotHelperForChart(chartId));
+                     const originalTableData = alasql.tables[dataSourceSelect.value]?.data;
+                     updateChartAxisSelectors(chartId, originalTableData);
+                     renderChart(chartId);
+                });
+                updateChartAxisSelectors(chartId, resultData);
+                renderChart(chartId);
+            } else { alert("A transformação não resultou em dados."); }
+        } catch (e) {
+            alert(`Erro ao transformar os dados: ${e.message}`);
+            console.error(e);
+        }
+    }
+
+    function setupEventListeners() {
+        document.getElementById('btn-filter').addEventListener('click', () => document.getElementById('filter-modal').classList.remove('hidden'));
+        document.getElementById('btn-download-csv').addEventListener('click', downloadCSV);
+        document.getElementById('btn-toggle-sql').addEventListener('click', () => document.getElementById('sql-section').classList.toggle('hidden'));
+        document.getElementById('btn-run-sql').addEventListener('click', runQueryAndUpdateUI);
+        document.getElementById('btn-reset-data').addEventListener('click', () => {
+            Object.keys(alasql.tables).forEach(key => {
+                if(key !== initialTableName) delete alasql.tables[key];
+            });
+            updateTableListUI();
+            document.getElementById('sql-editor').value = `SELECT * FROM ${initialTableName};`;
+            runQueryAndUpdateUI();
+        });
+        document.getElementById('apply-filter-btn').addEventListener('click', () => applyFilter(true));
+        document.querySelectorAll('.modal-close').forEach(el => el.addEventListener('click', () => el.closest('.modal').classList.add('hidden')));
+        document.getElementById('btn-add-csv').addEventListener('click', () => document.getElementById('csv-upload-input').click());
+        document.getElementById('csv-upload-input').addEventListener('change', handleFileUploads);
+        document.getElementById('btn-add-chart').addEventListener('click', addChartAnalysis);
+    }
+
+    function updateColumnStructure(newStructure) {
+        columnStructure = newStructure.map(col => ({ ...col, displayName: col.displayName || col.originalName }));
+        const filterColumnSelect = document.getElementById('filter-column');
+        filterColumnSelect.innerHTML = '<option value="">-- Selecione --</option>';
+        newStructure.forEach(col => filterColumnSelect.add(new Option(col.displayName, col.originalName)));
+    }
+
+    function updateStatus() {
+        const total = (originalData && originalData.length) ? originalData.length : 0;
+        document.getElementById('status-label').textContent = `Exibindo ${currentData.length} registros. (Original: ${total})`;
+    }
+
+    function renderTable() {
+        const tableContainer = document.getElementById('table-container');
+        tableContainer.innerHTML = ''; 
+        if (currentData.length === 0) {
+            tableContainer.innerHTML = `<p class="text-center text-gray-500 p-8">Nenhum dado para exibir. Execute uma consulta ou resete os dados.</p>`;
+            return;
+        }
+        const table = document.createElement('table');
+        table.className = 'min-w-full divide-y divide-gray-200';
+        const thead = document.createElement('thead');
+        thead.className = 'bg-gray-50';
+        const headerRow = document.createElement('tr');
+        columnStructure.forEach((col) => {
+            const th = document.createElement('th');
+            th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none relative group';
+            th.dataset.originalName = col.originalName;
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'flex items-center';
+            titleDiv.textContent = col.displayName;
+            const sortIcon = document.createElement('span');
+            sortIcon.className = 'ml-2 text-gray-400';
+            if (sortState[col.originalName] === 'asc') { sortIcon.innerHTML = '&#9650;'; } 
+            else if (sortState[col.originalName] === 'desc') { sortIcon.innerHTML = '&#9660;'; }
+            titleDiv.appendChild(sortIcon);
+            th.appendChild(titleDiv);
+            th.addEventListener('click', () => handleSort(col.originalName));
+            const menuIcon = document.createElement('span');
+            menuIcon.innerHTML = '&#8942;';
+            menuIcon.className = 'absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition p-1 rounded-full hover:bg-gray-200';
+            menuIcon.addEventListener('click', (e) => { e.stopPropagation(); showColumnMenu(e.target, col.originalName); });
+            th.appendChild(menuIcon);
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        tbody.className = 'bg-white divide-y divide-gray-200';
+        currentData.forEach((row, rowIndex) => {
+            const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50';
+            tr.dataset.rowId = rowIndex;
+            columnStructure.forEach(col => {
+                const td = document.createElement('td');
+                td.className = 'px-4 py-3 whitespace-nowrap text-sm text-gray-700';
+                td.textContent = row[col.originalName];
+                td.setAttribute('contenteditable', 'false');
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        tableContainer.appendChild(table);
+    }
+    
+    function handleSort(columnName) {
+        const currentOrder = sortState[columnName];
+        let nextOrder = (currentOrder === 'asc') ? 'desc' : (currentOrder === 'desc' ? undefined : 'asc');
+        Object.keys(sortState).forEach(key => delete sortState[key]);
+        if (nextOrder) {
+            sortState[columnName] = nextOrder;
+            currentData.sort((a, b) => {
+                const valA = a[columnName], valB = b[columnName];
+                const numA = parseFloat(String(valA).replace(',', '.')), numB = parseFloat(String(valB).replace(',', '.'));
+                let comparison = (!isNaN(numA) && !isNaN(numB)) ? numA - numB : String(valA || '').toLowerCase().localeCompare(String(valB || '').toLowerCase());
+                return nextOrder === 'asc' ? comparison : -comparison;
+            });
+        }
+        renderTable();
+    }
+    
+    function showColumnMenu(target, columnName) {
+        const existingMenu = document.getElementById('column-context-menu');
+        if (existingMenu) existingMenu.remove();
+        const menu = document.createElement('div');
+        menu.id = 'column-context-menu';
+        menu.className = 'absolute z-50 w-48 bg-white rounded-md shadow-lg border';
+        const rect = target.getBoundingClientRect();
+        menu.style.top = `${rect.bottom + window.scrollY}px`;
+        menu.style.left = `${rect.left + window.scrollX}px`;
+        menu.innerHTML = `<a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="rename-col">Renomear</a>`;
+        document.body.appendChild(menu);
+        document.getElementById('rename-col').onclick = (e) => { e.preventDefault(); renameColumn(columnName); menu.remove(); };
+        document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.remove(); }, { once: true });
+    }
+    
+    function renameColumn(oldName) {
+        const col = columnStructure.find(c => c.originalName === oldName);
+        const newName = prompt(`Digite o novo nome para a coluna "${col.displayName}":`, col.displayName);
+        if (newName && newName.trim()) { col.displayName = newName.trim(); renderTable(); }
+    }
+
+    function applyFilter(close = true) {
+        const column = document.getElementById('filter-column').value, condition = document.getElementById('filter-condition').value, value = document.getElementById('filter-value').value.toLowerCase();
+        const dataToFilter = JSON.parse(JSON.stringify(currentData));
+        currentData = dataToFilter.filter(row => {
+            if (!column) return true;
+            const cellValue = String(row[column] || '').toLowerCase();
+            const numCellValue = parseFloat(String(row[column]).replace(',', '.')), numValue = parseFloat(String(value).replace(',', '.'));
+            switch (condition) {
+                case 'contains': return cellValue.includes(value);
+                case 'not_contains': return !cellValue.includes(value);
+                case 'equals': return cellValue === value;
+                case 'not_equals': return cellValue !== value;
+                case 'greater': return !isNaN(numCellValue) && !isNaN(numValue) && numCellValue > numValue;
+                case 'less': return !isNaN(numCellValue) && !isNaN(numValue) && numCellValue < numValue;
+                default: return true;
+            }
+        });
+        renderTable();
+        if(close) document.getElementById('filter-modal').classList.add('hidden');
+    }
+
+    function downloadCSV() {
+        if (currentData.length === 0) return;
+        const headers = columnStructure.map(c => c.displayName);
+        const rows = currentData.map(row => columnStructure.map(col => {
+            let cellString = String(row[col.originalName] ?? '');
+            if (cellString.includes(',') || cellString.includes('"') || cellString.includes('\n')) { cellString = `"${cellString.replace(/"/g, '""')}"`; }
+            return cellString;
+        }).join(','));
+        const csvContent = [headers.join(','), ...rows].join('\n');
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "power-graphx-export.csv";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+    
+    // NOVO: Helper para atualizar seletores de eixos do gráfico
+    function updateChartAxisSelectors(chartId, data) {
+        const section = document.getElementById(`chart-section-${chartId}`);
+        if (!section || !data || data.length === 0) return;
+        const cols = Object.keys(data[0]).map(name => ({ originalName: name, displayName: name }));
+        const numericCols = cols.filter(c => data.some(row => row[c.originalName] && !isNaN(parseFloat(String(row[c.originalName]).replace(',', '.')))));
+        section.querySelectorAll('.series-control').forEach(series => {
+            const xAxisSelect = series.querySelector('select[name="x-axis"]'), yAxisSelect = series.querySelector('select[name="y-axis"]');
+            const currentX = xAxisSelect.value, currentY = yAxisSelect.value;
+            xAxisSelect.innerHTML = '';
+            cols.forEach(c => xAxisSelect.add(new Option(c.displayName, c.originalName)));
+            if (cols.find(c => c.originalName === currentX)) xAxisSelect.value = currentX;
+            yAxisSelect.innerHTML = '';
+            numericCols.forEach(c => yAxisSelect.add(new Option(c.displayName, c.originalName)));
+            if (numericCols.find(c => c.originalName === currentY)) yAxisSelect.value = currentY;
+        });
+    }
+
+    function initializeChartUI(id) {
+        const section = document.getElementById(`chart-section-${id}`);
+        if (!section) return;
+
+        section.addEventListener('change', () => renderChart(id));
+        section.addEventListener('input', () => renderChart(id));
+        section.querySelector('.add-series-btn').addEventListener('click', () => addSeriesControl(id));
+        section.querySelector('.download-chart-btn').addEventListener('click', () => downloadChart(id));
+        section.querySelector('.remove-chart-btn').addEventListener('click', () => removeChartAnalysis(id));
+        section.querySelector('.y-axis-auto').onchange = (e) => { section.querySelector('.y-axis-max').disabled = e.target.checked; };
+        section.querySelector('.unpivot-chart-data-btn').addEventListener('click', () => showUnpivotHelperForChart(id));
+
+        const dataSourceSelect = section.querySelector('.chart-data-source');
+        dataSourceSelect.addEventListener('change', (e) => {
+            const selectedTable = e.target.value;
+            if (chartTransformedData[id]) {
+                delete chartTransformedData[id];
+                const transformControls = document.getElementById(`data-transform-controls-${id}`);
+                transformControls.innerHTML = `<button type="button" class="unpivot-chart-data-btn text-xs bg-indigo-600 text-white py-1 px-2 rounded-md hover:bg-indigo-700 w-full">Transformar Dados (Unpivot)</button>`;
+                transformControls.querySelector('.unpivot-chart-data-btn').addEventListener('click', () => showUnpivotHelperForChart(id));
+            }
+            const tableData = alasql.tables[selectedTable]?.data;
+            updateChartAxisSelectors(id, tableData);
+            renderChart(id);
+        });
+
+        addSeriesControl(id, true);
+        updateTableListUI();
+    }
+
+    function addSeriesControl(chartId, isFirst = false) {
+        const seriesContainer = document.getElementById(`series-container-${chartId}`);
+        const newSeries = document.createElement('div');
+        newSeries.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end series-control';
+        newSeries.innerHTML = `
+            <div><label class="text-xs font-semibold">Eixo X / Grupo:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
+            <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option></select></div></div>
+            <div class="sm:col-span-2"><label class="text-xs font-semibold">Nome da Série (Legenda):</label><input type="text" name="series-label" class="mt-1 block w-full rounded-md border-gray-300 text-sm" placeholder="Opcional. Ex: Total de Vendas"></div>
+            <div class="combo-type-control" style="display: none;"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
+            <div class="flex items-end space-x-2"><div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="#${Math.floor(Math.random()*16777215).toString(16)}" name="color" class="mt-1 w-full h-9 p-0 border-0 bg-white rounded-md"></div>
+                ${!isFirst ? `<button type="button" class="remove-series-btn h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600">&times;</button>` : ''}</div>`;
+        if (!isFirst) {
+            newSeries.querySelector('.remove-series-btn').onclick = () => { newSeries.remove(); renderChart(chartId); };
+        }
+        seriesContainer.appendChild(newSeries);
+        const dataSourceSelect = document.getElementById(`chart-data-source-${chartId}`);
+        if(dataSourceSelect.value) {
+           const tableData = alasql.tables[dataSourceSelect.value]?.data;
+           updateChartAxisSelectors(chartId, tableData);
+        }
+    }
+
+    function renderChart(id) {
+        if (chartInstances[id]) chartInstances[id].destroy();
+        const section = document.getElementById(`chart-section-${id}`);
+        if (!section) return;
+        
+        const transformedData = chartTransformedData[id];
+        const dataSource = section.querySelector('.chart-data-source').value;
+        const chartData = transformedData || alasql.tables[dataSource]?.data;
+
+        const canvas = document.getElementById(`mainChart-${id}`);
+        const ctx = canvas.getContext('2d');
+        if (!chartData || chartData.length === 0) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+        
+        const chartType = section.querySelector(`input[name="chart-type-${id}"]:checked`).value;
+        section.querySelectorAll('.combo-type-control').forEach(el => el.style.display = chartType === 'combo' ? 'block' : 'none');
+        const seriesControls = section.querySelectorAll('.series-control');
+        if (seriesControls.length === 0) return;
+        const firstXAxis = seriesControls[0].querySelector('[name="x-axis"]').value;
+        if (!firstXAxis) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+        const labels = [...new Set(chartData.map(d => d[firstXAxis]))].sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
+        const datasets = Array.from(seriesControls).map(control => {
+            const yCol = control.querySelector('[name="y-axis"]').value, xCol = control.querySelector('[name="x-axis"]').value, agg = control.querySelector('[name="aggregation"]').value;
+            const customLabel = control.querySelector('input[name="series-label"]').value, seriesTypeOption = control.querySelector('[name="series-type"]').value;
+            let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
+            const data = labels.map(label => {
+                const group = chartData.filter(d => d[xCol] == label).map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0);
+                if (group.length === 0) return 0;
+                switch(agg) {
+                    case 'sum': return group.reduce((a, b) => a + b, 0);
+                    case 'avg': return group.reduce((a, b) => a + b, 0) / group.length;
+                    case 'count': return group.length;
+                    case 'min': return Math.min(...group);
+                    case 'max': return Math.max(...group);
+                    default: return 0;
+                }
+            });
+            return {
+                label: customLabel.trim() || `${yCol} (${agg})`, data: data, borderColor: control.querySelector('[name="color"]').value,
+                backgroundColor: control.querySelector('[name="color"]').value + 'B3', type: seriesType,
+                tension: parseFloat(section.querySelector('.line-interpolation').value) || 0.4,
+                borderRadius: parseInt(section.querySelector('.bar-border-radius').value) || 0
+            };
+        });
+
+        const fontColor = '#64748B', gridColor = section.querySelector('.show-grid').checked ? 'rgba(0, 0, 0, 0.1)' : 'transparent';
+        const yAxisAuto = section.querySelector('.y-axis-auto').checked, yAxisMax = parseFloat(section.querySelector('.y-axis-max').value);
+        const labelPos = section.querySelector('.label-position').value, chartTitle = section.querySelector('.chart-title-input').value, chartSubtitle = section.querySelector('.chart-subtitle-input').value;
+        const options = {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                title: { display: !!chartTitle, text: chartTitle, font: { size: 18 } },
+                subtitle: { display: !!chartSubtitle, text: chartSubtitle, padding: { bottom: 10 } },
+                datalabels: {
+                    display: section.querySelector('.show-labels').checked, color: fontColor,
+                    font: { size: parseInt(section.querySelector('.label-size').value) || 12 },
+                    align: labelPos, anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'),
+                    formatter: val => typeof val === 'number' ? val.toLocaleString('pt-BR') : val
+                }
+            },
+            scales: {
+                x: { ticks: { color: fontColor }, grid: { color: gridColor }, stacked: chartType === 'stacked' },
+                y: { beginAtZero: true, ticks: { color: fontColor }, grid: { color: gridColor }, max: yAxisAuto ? undefined : yAxisMax, stacked: chartType === 'stacked' }
+            },
+            indexAxis: chartType === 'horizontalBar' ? 'y' : 'x'
+        };
+        chartInstances[id] = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options });
+    }
+
+    function downloadChart(id) {
+        const chart = chartInstances[id];
+        if (!chart) { alert('Gere um gráfico para poder baixá-lo.'); return; }
+        const link = document.createElement('a');
+        link.href = chart.toBase64Image('image/png', 1.0);
+        link.download = `power-graphx-chart-${id}.png`;
+        link.click();
+    }
+'@
 
     return @"
 <!DOCTYPE html>
@@ -164,504 +573,210 @@ Function Get-HtmlTemplate {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Power-Graphx - Relatório Dinâmico</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <title>Power-Graphx SQL Editor (AlaSQL)</title>
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); padding: 1.5rem; transition: all 0.3s ease-in-out; }
-        .chart-container { position: relative; width: 100%; height: 650px; }
-        .chart-selector label { border: 2px solid #e5e7eb; border-radius: 0.5rem; padding: 0.5rem; cursor: pointer; transition: all 0.2s ease-in-out; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
-        .chart-selector label:hover { border-color: #9ca3af; background-color: #f9fafb; }
+        .modal { transition: opacity 0.25s ease; }
+        #table-container { max-height: calc(100vh - 200px); overflow: auto; }
+        table thead { position: sticky; top: 0; z-index: 10; }
         .chart-selector input:checked + label { border-color: #3b82f6; background-color: #eff6ff; box-shadow: 0 0 0 2px #3b82f6; }
-        .chart-selector input { display: none; }
-        .divider { border-top: 1px solid #e5e7eb; }
+        .divider { border-top: 1px solid #e5e7eb; margin-top: 1rem; margin-bottom: 1rem; }
+        #charts-container { scroll-margin-top: 80px; }
     </style>
+    $($CdnLibraryTags)
 </head>
-<body class="text-gray-900">
-    <header class="bg-[#0f172a] text-white text-center py-12 px-4">
-        <h1 class="text-4xl md:text-5xl font-black tracking-tight">Relatório Dinâmico Interativo</h1>
-        <p class="mt-4 text-lg text-blue-200 max-w-3xl mx-auto">Dados processados via Power-Graphx Editor.</p>
-    </header>
-    <main class="container mx-auto p-4 md:p-8 -mt-10">
-        <section id="controls" class="card mb-6">
-             <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6">
-                <div>
-                    <h2 class="text-xl font-bold text-[#1e293b] mb-4">1. Seleção de Dados</h2>
-                    <div class="mt-4 pt-4 border-t">
-                        <div class="flex justify-between items-center mb-2">
-                             <h3 class="text-lg font-bold text-[#1e293b]">Séries de Dados (Eixos)</h3>
-                             <button id="add-series-btn" class="bg-blue-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-blue-600 transition">+ Adicionar Série</button>
-                        </div>
-                        <div id="series-container" class="space-y-3"></div>
-                    </div>
+<body class="bg-gray-100 font-sans">
+    <script id="jsonData" type="application/json">$JsonData</script>
+    <script id="jsonColumnStructure" type="application/json">$JsonColumnStructure</script>
+    <input type="file" id="csv-upload-input" multiple accept=".csv" class="hidden">
+
+    <header class="bg-white shadow-md p-4 sticky top-0 z-20">
+        <div class="container mx-auto">
+            <div class="flex justify-between items-center">
+                <h1 class="text-2xl font-bold text-gray-800">Power-Graphx SQL Editor</h1>
+                <div class="flex items-center space-x-2">
+                    <button id="btn-add-csv" class="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-md hover:bg-orange-700">Adicionar CSV</button>
+                    <button id="btn-filter" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">Filtrar</button>
+                    <button id="btn-toggle-sql" class="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-md hover:bg-teal-700">Console SQL</button>
+                    <button id="btn-add-chart" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">Adicionar Gráfico</button>
+                    <button id="btn-download-csv" class="px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded-md hover:bg-gray-900">Baixar CSV</button>
                 </div>
-                 <div class="flex flex-col justify-between">
-                     <div>
-                         <h2 class="text-xl font-bold text-[#1e293b] mb-4">2. Escolha o Tipo de Gráfico</h2>
-                         <div class="chart-selector grid grid-cols-3 sm:grid-cols-6 gap-2">
-                            <div><input type="radio" name="chart-type" value="combo" id="type-combo" checked><label for="type-combo"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/><path d="M3 12l5-4 5 6 5-4"/></svg><span class="text-xs font-semibold">Combo</span></label></div>
-                            <div><input type="radio" name="chart-type" value="stacked" id="type-stacked"><label for="type-stacked"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="#3b82f6" stroke="#3b82f6" stroke-width="1"><rect x="5" y="12" width="4" height="6"/><rect x="10" y="8" width="4" height="10"/><rect x="15" y="4" width="4" height="14"/><path d="M5 12V9h4v3m1-4V4h4v4m1-4V2h4v2" fill="#ef4444"/></svg><span class="text-xs font-semibold">Empilhado</span></label></div>
-                            <div><input type="radio" name="chart-type" value="line" id="type-line"><label for="type-line"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M3 17l5-4 5 6 5-4 4 2"/></svg><span class="text-xs font-semibold">Linha</span></label></div>
-                            <div><input type="radio" name="chart-type" value="scatter" id="type-scatter"><label for="type-scatter"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="17" cy="17" r="1"/><circle cx="7" cy="17" r="1"/><circle cx="17" cy="7" r="1"/></svg><span class="text-xs font-semibold">Dispersão</span></label></div>
-                            <div><input type="radio" name="chart-type" value="bubble" id="type-bubble"><label for="type-bubble"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="4"/><circle cx="16" cy="16" r="6"/><circle cx="17" cy="7" r="2"/></svg><span class="text-xs font-semibold">Bolhas</span></label></div>
-                            <div><input type="radio" name="chart-type" value="pie" id="type-pie"><label for="type-pie"><svg class="w-8 h-8 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg><span class="text-xs font-semibold">Pizza</span></label></div>
-                         </div>
+            </div>
+            <div class="text-xs text-gray-500 mt-1" id="status-label">Carregando...</div>
+        </div>
+    </header>
+
+    <main class="container mx-auto p-4">
+        <section id="sql-section" class="hidden mb-6 bg-white rounded-lg shadow">
+             <div class="p-6 grid grid-cols-1 md:grid-cols-4 gap-6">
+                 <div class="md:col-span-3">
+                     <h2 class="text-2xl font-bold text-gray-800 mb-2">Console SQL (AlaSQL)</h2>
+                     <div class="flex items-center space-x-2 mb-4">
+                        <p class="text-sm text-gray-600">Exemplo: <code>SELECT * FROM source_data LIMIT 10;</code></p>
                      </div>
-                      <div class="mt-6"><button id="update-charts-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition hover:bg-blue-700 flex items-center justify-center text-lg">
-                          Gerar / Atualizar Gráfico
-                      </button></div>
+                     <textarea id="sql-editor" class="w-full h-32 p-2 font-mono text-sm border border-gray-300 rounded-md" placeholder="SELECT * FROM source_data;">SELECT * FROM source_data;</textarea>
+                 </div>
+                 <div class="md:col-span-1">
+                     <h3 class="text-lg font-bold text-gray-700 mb-2">Tabelas Carregadas</h3>
+                     <div class="bg-gray-50 p-3 rounded-md h-32 overflow-y-auto">
+                         <ul id="table-list" class="list-disc list-inside text-sm font-mono text-gray-800"></ul>
+                     </div>
+                 </div>
+                 <div class="md:col-span-4 mt-2 flex justify-between items-center">
+                     <div id="sql-status" class="text-sm text-gray-500 italic">Aguardando inicialização...</div>
+                     <div class="flex-shrink-0">
+                         <button id="btn-reset-data" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300">Resetar Dados</button>
+                         <button id="btn-run-sql" class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">Executar Consulta</button>
+                     </div>
                  </div>
              </div>
         </section>
         
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <div id="chart-card" class="lg:col-span-3 card transition-all duration-300">
-                 <div class="flex justify-between items-center mb-4">
-                     <h3 id="chart-title" class="text-xl font-bold text-[#1e293b]"></h3>
-                 </div>
-                 <div class="chart-container"><canvas id="mainChart"></canvas></div>
-            </div>
-            <div id="format-panel" class="lg:col-span-1 card">
-                <h3 class="text-xl font-bold text-[#1e293b] mb-4">Formatar Visual</h3>
-                <div class="space-y-4">
-                    <div>
-                        <span class="font-semibold text-gray-700 text-sm">Aparência</span>
-                        <div class="flex items-center mt-2"><input id="dark-mode" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="dark-mode" class="ml-2 block text-sm text-gray-900">Modo Escuro</label></div>
-                    </div>
-                    <div class="divider"></div>
-                    <div>
-                        <span class="font-semibold text-gray-700 text-sm">Rótulos de Dados</span>
-                        <div class="flex items-center mt-2"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-labels" class="ml-2 block text-sm text-gray-900">Exibir rótulos</label></div>
-                        <div id="label-options" class="mt-2 space-y-2 hidden">
-                            <div>
-                                <label for="label-position" class="text-xs text-gray-600">Posição:</label>
-                                <select id="label-position" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
-                                    <option value="top">Topo</option>
-                                    <option value="center">Centro</option>
-                                    <option value="bottom">Base</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label for="label-size" class="text-xs text-gray-600">Tamanho Fonte:</label>
-                                <input type="number" id="label-size" value="12" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="divider"></div>
-                    <div>
-                        <span class="font-semibold text-gray-700 text-sm">Linhas de Grade</span>
-                        <div class="flex items-center mt-2"><input id="show-grid" type="checkbox" checked class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-grid" class="ml-2 block text-sm text-gray-900">Exibir grades</label></div>
-                    </div>
-                    <div class="divider"></div>
-                    <div id="y-axis-max-control">
-                        <span class="font-semibold text-gray-700 text-sm">Eixo Y (Primário)</span>
-                        <div class="flex items-center mt-2"><input id="y-axis-auto" type="checkbox" checked class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="y-axis-auto" class="ml-2 block text-sm text-gray-900">Automático</label></div>
-                        <input type="number" id="y-axis-max" placeholder="Ex: 100" disabled class="mt-2 block w-full rounded-md border-gray-300 shadow-sm text-sm disabled:bg-gray-100">
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div id="table-container" class="bg-white rounded-lg shadow overflow-hidden mb-6"></div>
+        <div id="charts-container" class="space-y-6"></div>
     </main>
+
+    <template id="chart-analysis-template">
+        <section id="chart-section-__ID__" class="chart-analysis-section bg-white rounded-lg shadow" data-id="__ID__">
+             <div class="p-6">
+                 <div class="flex justify-between items-center mb-4">
+                     <h2 class="text-2xl font-bold text-gray-800">Análise Gráfica __ID__</h2>
+                     <button class="remove-chart-btn text-red-500 hover:text-red-700 font-bold text-xl">&times;</button>
+                 </div>
+                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                      <div class="lg:col-span-1 flex flex-col space-y-4">
+                          <div>
+                            <h3 class="font-bold text-gray-700 mb-2">1. Fonte de Dados</h3>
+                            <div class="space-y-2">
+                                <select id="chart-data-source-__ID__" class="chart-data-source block w-full rounded-md border-gray-300 text-sm"></select>
+                                <div id="data-transform-controls-__ID__">
+                                   <button type="button" class="unpivot-chart-data-btn text-xs bg-indigo-600 text-white py-1 px-2 rounded-md hover:bg-indigo-700 w-full">Transformar Dados (Unpivot)</button>
+                                </div>
+                            </div>
+                          </div>
+                          <div>
+                              <h3 class="font-bold text-gray-700 mb-2">2. Tipo de Gráfico</h3>
+                              <div class="chart-selector grid grid-cols-3 gap-2">
+                                  <div><input type="radio" name="chart-type-__ID__" value="bar" id="type-bar-__ID__" checked class="hidden"><label for="type-bar-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Barra</label></div>
+                                  <div><input type="radio" name="chart-type-__ID__" value="line" id="type-line-__ID__" class="hidden"><label for="type-line-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Linha</label></div>
+                                  <div><input type="radio" name="chart-type-__ID__" value="combo" id="type-combo-__ID__" class="hidden"><label for="type-combo-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Combo</label></div>
+                                  <div><input type="radio" name="chart-type-__ID__" value="stacked" id="type-stacked-__ID__" class="hidden"><label for="type-stacked-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Empilhado</label></div>
+                                  <div><input type="radio" name="chart-type-__ID__" value="horizontalBar" id="type-horizontalBar-__ID__" class="hidden"><label for="type-horizontalBar-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Horizontal</label></div>
+                              </div>
+                          </div>
+                          <div>
+                              <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">3. Séries de Dados</h3><button class="add-series-btn text-xs bg-blue-500 text-white py-1 px-2 rounded-full hover:bg-blue-600">+ Série</button></div>
+                              <div id="series-container-__ID__" class="space-y-3 max-h-60 overflow-y-auto"></div>
+                          </div>
+                      </div>
+                      <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4"><div class="relative w-full h-full min-h-[400px]"><canvas id="mainChart-__ID__"></canvas></div></div>
+                      <div class="lg:col-span-1 flex flex-col space-y-2 text-sm">
+                          <h3 class="font-bold text-gray-700 mb-2">4. Formatar Visual</h3>
+                          <div><span class="font-semibold text-gray-700">Títulos</span>
+                               <div class="mt-2 space-y-2">
+                                   <div><label class="text-xs text-gray-600">Título:</label><input type="text" placeholder="Título do Gráfico" class="chart-title-input mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                                   <div><label class="text-xs text-gray-600">Subtítulo:</label><input type="text" placeholder="Subtítulo do Gráfico" class="chart-subtitle-input mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                               </div>
+                          </div>
+                          <div class="divider"></div>
+                          <div><span class="font-semibold text-gray-700">Rótulos de Dados</span>
+                              <div class="flex items-center mt-2"><input id="show-labels-__ID__" type="checkbox" class="show-labels h-4 w-4 rounded border-gray-300"><label for="show-labels-__ID__" class="ml-2 text-gray-900">Exibir rótulos</label></div>
+                              <div class="mt-2 space-y-2">
+                                  <div><label class="text-xs text-gray-600">Posição:</label><select class="label-position mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="end">Topo/Direita</option><option value="center">Centro</option><option value="start">Base/Esquerda</option></select></div>
+                                  <div><label class="text-xs text-gray-600">Tamanho Fonte:</label><input type="number" value="12" class="label-size mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                              </div>
+                          </div>
+                          <div class="divider"></div>
+                          <div><span class="font-semibold text-gray-700">Opções de Barra/Linha</span>
+                              <div class="mt-2"><label class="text-xs text-gray-600">Arredondamento da Borda:</label><input type="number" value="0" min="0" class="bar-border-radius mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                              <div class="mt-2"><label class="text-xs text-gray-600">Interpolação da Linha:</label><select class="line-interpolation mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="0.0">Linear</option><option value="0.4" selected>Suave</option><option value="1.0">Curva Máxima</option></select></div>
+                          </div>
+                          <div class="divider"></div>
+                          <div><span class="font-semibold text-gray-700">Eixos e Grade</span>
+                              <div class="flex items-center mt-2"><input id="show-grid-__ID__" type="checkbox" checked class="show-grid h-4 w-4 rounded border-gray-300"><label for="show-grid-__ID__" class="ml-2 text-gray-900">Exibir grades</label></div>
+                              <div class="flex items-center mt-2"><input id="y-axis-auto-__ID__" type="checkbox" checked class="y-axis-auto h-4 w-4 rounded border-gray-300"><label for="y-axis-auto-__ID__" class="ml-2 text-gray-900">Eixo Y Automático</label></div>
+                              <input type="number" placeholder="Ex: 100" class="y-axis-max mt-1 block w-full rounded-md border-gray-300 text-xs" disabled>
+                          </div>
+                          <div class="divider"></div>
+                          <div>
+                              <h3 class="font-bold text-gray-700 mb-2">5. Ações</h3>
+                              <button class="download-chart-btn w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
+                          </div>
+                      </div>
+                 </div>
+             </div>
+        </section>
+    </template>
+
+    <div id="filter-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-30">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center"><h3 class="text-lg font-medium text-gray-900">Filtrar Dados (Vista Atual)</h3><button class="modal-close font-bold text-xl">&times;</button></div>
+            <div class="mt-4 space-y-4">
+                <div><label for="filter-column" class="block text-sm font-medium text-gray-700">Coluna</label><select id="filter-column" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm"></select></div>
+                <div><label for="filter-condition" class="block text-sm font-medium text-gray-700">Condição</label><select id="filter-condition" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm"><option value="contains">Contém</option><option value="not_contains">Não Contém</option><option value="equals">Igual a</option><option value="not_equals">Diferente de</option><option value="greater">Maior que (numérico)</option><option value="less">Menor que (numérico)</option></select></div>
+                <div><label for="filter-value" class="block text-sm font-medium text-gray-700">Valor</label><input type="text" id="filter-value" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-2"><button class="modal-close px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button id="apply-filter-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Aplicar</button></div>
+        </div>
+    </div>
+
     <script>
-        // --- INÍCIO DO JAVASCRIPT CORRIGIDO (VERSÃO 17.4) ---
-        let chartInstance;
-        let seriesCounter = 0;
-        const seriesColors = ["#3b82f6", "#ef4444", "#22c55e", "#f97316", "#8b5cf6", "#14b8a6"];
-        
-        function initializeApp(rawData, columnStructure) {
-            if (!rawData || !columnStructure) {
-                console.error("Dados ou estrutura de colunas não fornecidos.");
-                return;
-            }
-            Chart.register(ChartDataLabels);
-
-            function parseValue(value) {
-                if (typeof value === 'number') return value;
-                if (typeof value !== 'string') return value;
-                const cleanValue = value.replace(/[^0-9,-]/g, '').replace(',', '.');
-                const parsed = parseFloat(cleanValue);
-                return isNaN(parsed) ? value : parsed;
-            }
-            
-            function isNumeric(colName) {
-                if (rawData.length === 0) return false;
-                const sampleValue = rawData[0][colName];
-                if (sampleValue === null || typeof sampleValue === 'undefined') return false;
-                const parsed = parseFloat(String(sampleValue).replace(',', '.'));
-                return !isNaN(parsed) && String(sampleValue).trim() !== '';
-            }
-
-            function populateSelect(selectElement, type = 'all') {
-                if (!selectElement) return;
-                selectElement.innerHTML = '';
-                const options = columnStructure.filter(col => {
-                    if (type === 'numeric') return isNumeric(col.OriginalName);
-                    if (type === 'text') return !isNumeric(col.OriginalName);
-                    return true;
-                });
-                
-                options.forEach(col => {
-                    const option = document.createElement('option');
-                    option.value = col.OriginalName;
-                    option.textContent = col.DisplayName;
-                    selectElement.appendChild(option);
-                });
-            }
-
-            function addSeriesControl(isFirst = false) {
-                const seriesContainer = document.getElementById('series-container');
-                const seriesId = ++seriesCounter;
-                const defaultColor = seriesColors[(seriesId - 1) % seriesColors.length];
-                const seriesDiv = document.createElement('div');
-                seriesDiv.id = 'series-' + seriesId;
-                seriesDiv.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end';
-                
-                let content = '';
-                const eixoXLabel = isFirst ? 'Eixo X:' : 'Eixo X' + seriesId + ':';
-                const eixoYLabel = isFirst ? 'Eixo Y:' : 'Eixo Y' + seriesId + ':';
-                
-                content += '<div class="x-axis-control"><label class="text-xs font-semibold">' + eixoXLabel + '</label><select name="x-axis" class="axis-select mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm"></select></div>';
-                content += '<div><label class="text-xs font-semibold">' + eixoYLabel + '</label><select name="y-axis" class="axis-select mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm y-axis-select"></select></div>';
-                content += '<div class="size-axis-control" style="display: none;"><label class="text-xs font-semibold">Tamanho (Bolha):</label><select name="size-axis" class="axis-select mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm"></select></div>';
-                content += '<div class="combo-type-control"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="axis-select mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>';
-                content += '<div class="flex items-end space-x-2"><div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="' + defaultColor + '" name="color" class="axis-select mt-1 w-full h-9"></div>';
-                if (!isFirst) {
-                    content += '<button type="button" onclick="this.parentElement.parentElement.remove(); renderChart();" class="h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600 transition text-sm font-bold">&times;</button>';
-                }
-                content += '</div>';
-
-                seriesDiv.innerHTML = content;
-                seriesContainer.appendChild(seriesDiv);
-                
-                populateSelect(seriesDiv.querySelector('[name="x-axis"]'), 'all');
-                populateSelect(seriesDiv.querySelector('[name="y-axis"]'), 'numeric');
-                populateSelect(seriesDiv.querySelector('[name="size-axis"]'), 'numeric');
-            }
-
-            window.renderChart = function() {
-                if (chartInstance) { chartInstance.destroy(); }
-                const container = document.querySelector('.chart-container');
-                container.innerHTML = '<canvas id="mainChart"></canvas>';
-                const ctx = document.getElementById('mainChart').getContext('2d');
-                
-                const chartType = document.querySelector('input[name="chart-type"]:checked').value;
-                const seriesControls = document.querySelectorAll('#series-container > div');
-                if (seriesControls.length === 0) return;
-
-                const chartData = { datasets: [] };
-                let isCategorical = !['scatter', 'bubble'].includes(chartType);
-
-                if (isCategorical) {
-                    const firstXAxisSelect = seriesControls[0] ? seriesControls[0].querySelector('[name="x-axis"]') : null;
-                    if (firstXAxisSelect && firstXAxisSelect.value) {
-                         chartData.labels = rawData.map(d => d[firstXAxisSelect.value]);
-                    }
-                }
-                
-                seriesControls.forEach((control) => {
-                    const yColSelect = control.querySelector('[name="y-axis"]');
-                    const xColSelect = control.querySelector('[name="x-axis"]');
-                    const colorInput = control.querySelector('[name="color"]');
-                    const typeSelect = control.querySelector('[name="series-type"]');
-                    
-                    if (!yColSelect || !yColSelect.value || !xColSelect || !xColSelect.value || !colorInput) return;
-                    
-                    const yCol = yColSelect.value;
-                    const xCol = xColSelect.value;
-                    const colInfo = columnStructure.find(c => c.OriginalName === yCol);
-                    if (!colInfo) return;
-
-                    const dataset = {
-                        label: colInfo.DisplayName,
-                        borderColor: colorInput.value,
-                        backgroundColor: colorInput.value + 'B3',
-                        type: (chartType === 'combo' && typeSelect) ? typeSelect.value : (chartType === 'stacked' ? 'bar' : undefined),
-                    };
-                    
-                    if (chartType === 'line') dataset.type = 'line';
-
-                    if (chartType === 'pie') {
-                        dataset.data = rawData.map(d => parseValue(d[yCol]));
-                        if (chartData.labels) {
-                            dataset.backgroundColor = chartData.labels.map((_, i) => seriesColors[i % seriesColors.length]);
-                        }
-                    } else if (isCategorical) {
-                        dataset.data = rawData.map(d => parseValue(d[yCol]));
-                    } else {
-                        const sizeColSelect = control.querySelector('[name="size-axis"]');
-                        dataset.data = rawData.map(d => ({
-                            x: parseValue(d[xCol]),
-                            y: parseValue(d[yCol]),
-                            r: (chartType === 'bubble' && sizeColSelect && sizeColSelect.value) ? parseValue(d[sizeColSelect.value]) : undefined
-                        }));
-                    }
-                    chartData.datasets.push(dataset);
-                });
-                
-                if (chartData.datasets.length === 0) return;
-                
-                const finalChartType = ['combo', 'stacked'].includes(chartType) ? 'bar' : chartType;
-                const options = buildChartOptions(chartType, isCategorical);
-                chartInstance = new Chart(ctx, { type: finalChartType, data: chartData, options: options });
-            }
-
-            function buildChartOptions(chartType, isCategorical) {
-                const darkMode = document.getElementById('dark-mode').checked;
-                const showGrid = document.getElementById('show-grid').checked;
-                const showLabels = document.getElementById('show-labels').checked;
-                const labelPos = document.getElementById('label-position').value;
-                const labelSize = document.getElementById('label-size').value;
-                const yAxisAuto = document.getElementById('y-axis-auto').checked;
-                const yAxisMax = parseFloat(document.getElementById('y-axis-max').value);
-
-                const fontColor = darkMode ? '#E2E8F0' : '#64748B';
-                const gridColor = darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-
-                const options = {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { 
-                        legend: { labels: { color: fontColor } },
-                        datalabels: { 
-                            display: showLabels, 
-                            color: fontColor,
-                            font: { size: labelSize || 12 },
-                            align: labelPos === 'bottom' ? 'bottom' : (labelPos === 'center' ? 'center' : 'top'),
-                            anchor: labelPos === 'bottom' ? 'start' : (labelPos === 'center' ? 'center' : 'end'),
-                            formatter: (value) => typeof value === 'object' ? value.y : value
-                        }
-                    },
-                    scales: {}
-                };
-
-                if (chartType === 'pie') return options;
-                
-                const axisOptions = { grid: { display: showGrid, color: gridColor }, ticks: { color: fontColor } };
-                options.scales.x = { ...axisOptions, type: isCategorical ? 'category' : 'linear' };
-                options.scales.y = { ...axisOptions, beginAtZero: true };
-
-                if (!yAxisAuto && !isNaN(yAxisMax)) {
-                    options.scales.y.max = yAxisMax;
-                }
-
-                if (chartType === 'stacked') {
-                    options.scales.x.stacked = true;
-                    options.scales.y.stacked = true;
-                }
-
-                return options;
-            }
-
-            function updateUI() {
-                const chartType = document.querySelector('input[name="chart-type"]:checked').value;
-                const isScatterOrBubble = ['scatter', 'bubble'].includes(chartType);
-                
-                document.querySelectorAll('#series-container > div').forEach((sc, i) => {
-                    if (!sc) return;
-                    const xAxisControl = sc.querySelector('.x-axis-control');
-                    const sizeAxisControl = sc.querySelector('.size-axis-control');
-                    const comboTypeControl = sc.querySelector('.combo-type-control');
-
-                    if (xAxisControl) xAxisControl.style.display = (isScatterOrBubble || i === 0) ? 'block' : 'none';
-                    if (sizeAxisControl) sizeAxisControl.style.display = chartType === 'bubble' ? 'block' : 'none';
-                    if (comboTypeControl) comboTypeControl.style.display = chartType === 'combo' ? 'block' : 'none';
-                });
-                
-                document.getElementById('y-axis-max-control').style.display = chartType === 'pie' ? 'none' : 'block';
-                
-                renderChart();
-            }
-            
-            // --- Inicialização e Eventos ---
-            addSeriesControl(true);
-            document.getElementById('controls').addEventListener('change', updateUI);
-            document.getElementById('format-panel').addEventListener('change', renderChart);
-            document.getElementById('add-series-btn').addEventListener('click', () => { addSeriesControl(false); updateUI(); });
-            document.getElementById('update-charts-btn').addEventListener('click', renderChart);
-            
-            document.getElementById('show-labels').addEventListener('change', (e) => {
-                document.getElementById('label-options').style.display = e.target.checked ? 'block' : 'none';
-            });
-            document.getElementById('y-axis-auto').addEventListener('change', (e) => {
-                document.getElementById('y-axis-max').disabled = e.target.checked;
-            });
-            
-            updateUI();
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            try {
-                initializeApp($JsonData, $JsonColumnStructure);
-            } catch (e) {
-                console.error("Erro fatal ao inicializar o Power-Graphx:", e);
-                document.body.innerHTML = '<div class="text-center p-8 bg-red-100 text-red-700"><h1>Ocorreu um erro crítico</h1><p>Não foi possível renderizar o relatório. Verifique o console para mais detalhes.</p></div>';
-            }
-        });
+        $ApplicationJavaScript
     </script>
 </body>
 </html>
 "@
 }
 
-# --- 4. Construção da Interface Gráfica (Windows Forms) ---
-$Form = New-Object System.Windows.Forms.Form
-$Form.Text = "Power-Graphx Editor 17.4"
-$Form.Width = 1200
-$Form.Height = 800
-$Form.StartPosition = "CenterScreen"
-$Form.FormBorderStyle = 'Sizable'
-$Form.WindowState = 'Maximized'
-try { $Form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon("C:\Windows\System32\imageres.dll,25") } catch {}
+# --- 3. Função Principal de Execução ---
+Function Start-WebApp {
+    $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $OpenFileDialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+    $OpenFileDialog.Title = "Power-Graphx: Selecione o arquivo CSV inicial"
 
-
-$MainLayout = New-Object System.Windows.Forms.TableLayoutPanel
-$MainLayout.Dock = "Fill"
-$MainLayout.ColumnCount = 1
-$MainLayout.RowCount = 3
-$MainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 40)))
-$MainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 35)))
-$MainLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-$Form.Controls.Add($MainLayout)
-
-# --- Painel de Controles Superior ---
-$ControlPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$ControlPanel.Dock = "Fill"
-$ControlPanel.BackColor = [System.Drawing.Color]::FromArgb(240, 242, 245)
-$ControlPanel.Padding = New-Object System.Windows.Forms.Padding(5)
-$MainLayout.Controls.Add($ControlPanel, 0, 0)
-
-$ButtonLoadCsv = New-Object System.Windows.Forms.Button
-$ButtonLoadCsv.Text = "Carregar CSV"
-$ButtonLoadCsv.Font = "Segoe UI, 9"
-$ButtonLoadCsv.Size = New-Object System.Drawing.Size(120, 30)
-$ControlPanel.Controls.Add($ButtonLoadCsv)
-
-$ButtonGenerateHtml = New-Object System.Windows.Forms.Button
-$ButtonGenerateHtml.Text = "Gerar e Visualizar Relatório"
-$ButtonGenerateHtml.Font = "Segoe UI, 9, Bold"
-$ButtonGenerateHtml.Size = New-Object System.Drawing.Size(200, 30)
-$ButtonGenerateHtml.Enabled = $false
-$ControlPanel.Controls.Add($ButtonGenerateHtml)
-
-$StatusLabel = New-Object System.Windows.Forms.Label
-$StatusLabel.Text = "Aguardando arquivo CSV..."
-$StatusLabel.Font = "Segoe UI, 9"
-$StatusLabel.Margin = "5,5,0,0"
-$StatusLabel.TextAlign = "MiddleLeft"
-$StatusLabel.AutoSize = $true
-$ControlPanel.Controls.Add($StatusLabel)
-
-# --- Painel de Busca ---
-$SearchPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$SearchPanel.Dock = "Fill"
-$SearchPanel.BackColor = [System.Drawing.Color]::FromArgb(220, 225, 230)
-$SearchPanel.Visible = $false
-$SearchPanel.Padding = 5
-$MainLayout.Controls.Add($SearchPanel, 0, 1)
-
-$SearchLabel = New-Object System.Windows.Forms.Label
-$SearchLabel.Text = "Buscar:"
-$SearchLabel.Font = "Segoe UI, 9"
-$SearchLabel.Margin = "0,3,0,0"
-$SearchPanel.Controls.Add($SearchLabel)
-
-$SearchTextBox = New-Object System.Windows.Forms.TextBox
-$SearchTextBox.Size = New-Object System.Drawing.Size(250, 23)
-$SearchPanel.Controls.Add($SearchTextBox)
-
-$SearchButton = New-Object System.Windows.Forms.Button
-$SearchButton.Text = "Buscar"
-$SearchButton.Size = New-Object System.Drawing.Size(75, 25)
-$SearchPanel.Controls.Add($SearchButton)
-
-$CloseSearchButton = New-Object System.Windows.Forms.Button
-$CloseSearchButton.Text = "Fechar"
-$CloseSearchButton.Size = New-Object System.Drawing.Size(75, 25)
-$SearchPanel.Controls.Add($CloseSearchButton)
-
-$SearchResultLabel = New-Object System.Windows.Forms.Label
-$SearchResultLabel.Text = ""
-$SearchResultLabel.Font = "Segoe UI, 9"
-$SearchResultLabel.Margin = "10,3,0,0"
-$SearchPanel.Controls.Add($SearchResultLabel)
-
-# --- Data Grid View ---
-$DataGridView = New-Object System.Windows.Forms.DataGridView
-$DataGridView.Dock = "Fill"
-$DataGridView.BackgroundColor = [System.Drawing.Color]::White
-$DataGridView.BorderStyle = "None"
-$DataGridView.ColumnHeadersDefaultCellStyle.Font = "Segoe UI, 9, Bold"
-$DataGridView.ReadOnly = $true
-$DataGridView.AllowUserToAddRows = $false
-$MainLayout.Controls.Add($DataGridView, 0, 2)
-
-# --- Menu de Contexto para Renomear Coluna ---
-$ContextMenu = New-Object System.Windows.Forms.ContextMenuStrip
-$RenameMenuItem = $ContextMenu.Items.Add("Renomear Coluna...")
-$Global:ColumnToRenameIndex = -1
-
-# --- 5. Eventos ---
-$ButtonLoadCsv.Add_Click({
-    Load-CSVData -DataGridView $DataGridView -StatusLabel $StatusLabel -GenerateButton $ButtonGenerateHtml
-})
-
-$ButtonGenerateHtml.Add_Click({
-    Generate-HtmlReport -DataGridView $DataGridView -StatusLabel $StatusLabel
-})
-
-$DataGridView.Add_ColumnHeaderMouseClick({
-    param($sender, $e)
-    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right) {
-        $Global:ColumnToRenameIndex = $e.ColumnIndex
-        $ContextMenu.Show($DataGridView, $DataGridView.PointToClient([System.Windows.Forms.Cursor]::Position))
-    }
-})
-
-$RenameMenuItem.Add_Click({
-    if ($Global:ColumnToRenameIndex -ge 0) {
-        $column = $DataGridView.Columns[$Global:ColumnToRenameIndex]
-        $newName = Show-InputBox -Title "Renomear Coluna" -Prompt "Digite o novo nome para a coluna '$($column.HeaderText)':'" -DefaultText $column.HeaderText
-        if ($newName) {
-            $column.HeaderText = $newName
+    if ($OpenFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $FilePath = $OpenFileDialog.FileName
+        Write-Host "Analisando: $(Split-Path $FilePath -Leaf)..."
+        
+        try {
+            $firstLine = Get-Content -Path $FilePath -TotalCount 1 -Encoding Default
+            $bestDelimiter = if (($firstLine -split ';').Count -gt ($firstLine -split ',').Count) { ';' } else { ',' }
+            $Data = Import-Csv -Path $FilePath -Delimiter $bestDelimiter
+        } catch {
+            [System.Windows.Forms.MessageBox]::Show("Não foi possível ler os dados do arquivo CSV.", "Erro de Leitura", "OK", "Error")
+            return
         }
-    }
-})
 
-$Form.Add_KeyDown({
-    param($sender, $e)
-    if ($e.Control -and $e.KeyCode -eq 'F') {
-        $SearchPanel.Visible = !$SearchPanel.Visible
-        if ($SearchPanel.Visible) { $SearchTextBox.Focus() }
-    }
-})
-
-$CloseSearchButton.Add_Click({ $SearchPanel.Visible = $false })
-
-$SearchButton.Add_Click({
-    $searchTerm = $SearchTextBox.Text.ToLower()
-    if ([string]::IsNullOrWhiteSpace($searchTerm)) { return }
-
-    $DataGridView.ClearSelection()
-    $defaultCellStyle = New-Object System.Windows.Forms.DataGridViewCellStyle
-    $highlightCellStyle = New-Object System.Windows.Forms.DataGridViewCellStyle
-    $highlightCellStyle.BackColor = [System.Drawing.Color]::Yellow
-
-    $foundCount = 0
-    foreach ($row in $DataGridView.Rows) {
-        foreach ($cell in $row.Cells) {
-            $cell.Style = $defaultCellStyle
-            if ($cell.Value -and $cell.Value.ToString().ToLower().Contains($searchTerm)) {
-                $cell.Style = $highlightCellStyle
-                $foundCount++
+        if ($null -eq $Data -or $Data.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("O arquivo CSV está vazio ou em um formato inválido.", "Erro de Leitura", "OK", "Error")
+            return
+        }
+        
+        Write-Host "Dados carregados. Preparando a aplicação web..."
+        
+        $ColumnStructure = $Data[0].PSObject.Properties | ForEach-Object {
+            [PSCustomObject]@{
+                originalName = $_.Name
+                displayName  = $_.Name
             }
         }
+        
+        $JsonData = $Data | ConvertTo-Json -Compress -Depth 10
+        $JsonColumnStructure = $ColumnStructure | ConvertTo-Json -Compress
+        $cdnTags = Get-CdnLibraryTags
+        $HtmlContent = Get-HtmlTemplate -JsonData $JsonData -JsonColumnStructure $JsonColumnStructure -CdnLibraryTags $cdnTags
+        
+        $OutputPath = Join-Path $env:TEMP "PowerGraphx_AlaSQL_WebApp.html"
+        try {
+            $HtmlContent | Out-File -FilePath $OutputPath -Encoding UTF8
+            Write-Host "Aplicação gerada com sucesso! Abrindo no seu navegador..." -ForegroundColor Green
+            Start-Process $OutputPath
+        }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Ocorreu um erro ao gerar ou abrir o arquivo HTML: $($_.Exception.Message)", "Erro", "OK", "Error")
+        }
     }
-    $SearchResultLabel.Text = "$foundCount ocorrência(s) encontrada(s)."
-})
+}
 
-
-# --- 6. Exibir a Janela ---
-$Form.ShowDialog() | Out-Null
+# --- 4. Iniciar a Aplicação ---
+Start-WebApp
 
