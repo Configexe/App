@@ -1,18 +1,18 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 3.2.0 - Edição Web com Agregação (Pivot) e Formatação Avançada
+# Versão: 3.3.0 - Edição com Interface Integrada e Auto-Refresh
 # Autor: jefferson/configexe (com modernização por IA)
 #
-# Melhorias da Versão 3.2.0:
-# - Agregação de Dados (Pivot): Adicionado seletor de agregação (Soma, Média,
-#   Contagem, Mín/Máx) para cada série de dados, permitindo análises mais profundas.
-# - Formatação Avançada de Gráficos: Reintroduzido o painel de formatação
-#   completo, permitindo controle sobre rótulos, eixos, arredondamento de
-#   barras, suavização de linhas e mais.
-# - Interface Reorganizada: O modal de gráficos agora possui uma coluna
-#   dedicada para formatação, melhorando a usabilidade.
-# - Correções na Edição de Dados: Melhorada a lógica de atualização dos
-#   dados para garantir que edições na tabela se reflitam corretamente.
+# Melhorias da Versão 3.3.0:
+# - Interface Integrada: A seção de gráficos agora faz parte da página
+#   principal, localizada abaixo da tabela de dados, eliminando o modal.
+# - Atualização Automática: Gráficos são atualizados instantaneamente ao
+#   mudar qualquer opção de dados ou formatação, sem a necessidade de um
+#   botão "Atualizar".
+# - Edição em Tempo Real: Alterar um valor na tabela de dados também
+#   atualiza o gráfico em tempo real, se a seção de análise estiver visível.
+# - Usabilidade Aprimorada: O botão "Análise Gráfica" agora controla a
+#   visibilidade da seção de gráficos de forma fluida.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -95,31 +95,23 @@ Function Get-HtmlTemplate {
     const sortState = {};
 
     document.addEventListener('DOMContentLoaded', () => {
-        // Inicializa a aplicação com os dados embutidos pelo PowerShell
         originalData = JSON.parse(document.getElementById('jsonData').textContent);
         columnStructure = JSON.parse(document.getElementById('jsonColumnStructure').textContent);
-        currentData = JSON.parse(JSON.stringify(originalData)); // Deep copy para evitar referência
-
-        // Mapeia os nomes originais para os de exibição para uso futuro
+        currentData = JSON.parse(JSON.stringify(originalData)); 
         columnStructure.forEach(col => col.displayName = col.displayName || col.originalName);
-
-        // Renderiza a tabela inicial e configura os eventos
         renderTable();
         setupEventListeners();
         updateStatus();
     });
     
     function updateStatus() {
-        const statusLabel = document.getElementById('status-label');
-        if (statusLabel) {
-            statusLabel.textContent = `Exibindo ${currentData.length} de ${originalData.length} registros.`;
-        }
+        document.getElementById('status-label').textContent = `Exibindo ${currentData.length} de ${originalData.length} registros.`;
     }
 
     // --- Funções de Renderização da Tabela ---
     function renderTable() {
         const tableContainer = document.getElementById('table-container');
-        tableContainer.innerHTML = ''; // Limpa a tabela anterior
+        tableContainer.innerHTML = ''; 
         if (currentData.length === 0) {
             tableContainer.innerHTML = `<p class="text-center text-gray-500 p-8">Nenhum dado para exibir.</p>`;
             return;
@@ -128,27 +120,24 @@ Function Get-HtmlTemplate {
         const table = document.createElement('table');
         table.className = 'min-w-full divide-y divide-gray-200';
         
-        // Cria o cabeçalho
         const thead = document.createElement('thead');
         thead.className = 'bg-gray-50';
         const headerRow = document.createElement('tr');
-        columnStructure.forEach((col, index) => {
+        columnStructure.forEach((col) => {
             const th = document.createElement('th');
-            th.scope = 'col';
             th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none relative group';
             th.dataset.originalName = col.originalName;
             
             const titleDiv = document.createElement('div');
             titleDiv.className = 'flex items-center';
             titleDiv.textContent = col.displayName;
-            th.appendChild(titleDiv);
             
             const sortIcon = document.createElement('span');
             sortIcon.className = 'ml-2 text-gray-400';
             if (sortState[col.originalName] === 'asc') { sortIcon.innerHTML = '&#9650;'; } 
             else if (sortState[col.originalName] === 'desc') { sortIcon.innerHTML = '&#9660;'; }
             titleDiv.appendChild(sortIcon);
-
+            th.appendChild(titleDiv);
             th.addEventListener('click', () => handleSort(col.originalName));
             
             const menuIcon = document.createElement('span');
@@ -156,19 +145,16 @@ Function Get-HtmlTemplate {
             menuIcon.className = 'absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition p-1 rounded-full hover:bg-gray-200';
             menuIcon.addEventListener('click', (e) => { e.stopPropagation(); showColumnMenu(e.target, col.originalName); });
             th.appendChild(menuIcon);
-            
             headerRow.appendChild(th);
         });
         thead.appendChild(headerRow);
         table.appendChild(thead);
 
-        // Cria o corpo da tabela
         const tbody = document.createElement('tbody');
         tbody.className = 'bg-white divide-y divide-gray-200';
         currentData.forEach((row, rowIndex) => {
             const tr = document.createElement('tr');
             tr.className = 'hover:bg-gray-50';
-            // Adiciona um ID único para cada linha para encontrar o dado original correspondente
             tr.dataset.rowId = rowIndex;
             
             columnStructure.forEach(col => {
@@ -179,11 +165,18 @@ Function Get-HtmlTemplate {
                 td.addEventListener('blur', (e) => {
                     const newValue = e.target.textContent;
                     const id = parseInt(e.target.closest('tr').dataset.rowId);
-                    // Atualiza tanto a visualização atual quanto a fonte original de dados
+                    
+                    const originalRowIndex = originalData.indexOf(currentData[id]);
+
                     currentData[id][col.originalName] = newValue;
-                    // Encontrar o objeto exato no array original pode ser complexo se os dados não tiverem ID.
-                    // A melhor abordagem é assumir que a ordem inicial é a mesma.
-                    originalData[id][col.originalName] = newValue;
+                    if(originalRowIndex > -1) {
+                       originalData[originalRowIndex][col.originalName] = newValue;
+                    }
+
+                    const chartsSection = document.getElementById('charts-section');
+                    if (chartsSection && !chartsSection.classList.contains('hidden')) {
+                        renderChart();
+                    }
                 });
                 tr.appendChild(td);
             });
@@ -215,13 +208,12 @@ Function Get-HtmlTemplate {
                 if (!isNaN(numA) && !isNaN(numB)) {
                     comparison = numA - numB;
                 } else {
-                    comparison = String(valA).toLowerCase().localeCompare(String(valB).toLowerCase());
+                    comparison = String(valA || '').toLowerCase().localeCompare(String(valB || '').toLowerCase());
                 }
                 return nextOrder === 'asc' ? comparison : -comparison;
             });
         } else {
-             // Se a ordenação for removida, restaura para a ordem filtrada atual
-             applyFilter(false); // Re-aplica o filtro sem fechar modal
+             applyFilter(false); 
         }
         renderTable();
     }
@@ -229,22 +221,17 @@ Function Get-HtmlTemplate {
     function showColumnMenu(target, columnName) {
         const existingMenu = document.getElementById('column-context-menu');
         if (existingMenu) existingMenu.remove();
-
         const menu = document.createElement('div');
         menu.id = 'column-context-menu';
         menu.className = 'absolute z-50 w-48 bg-white rounded-md shadow-lg border';
-        
         const rect = target.getBoundingClientRect();
         menu.style.top = `${rect.bottom + window.scrollY}px`;
         menu.style.left = `${rect.left + window.scrollX}px`;
-
         menu.innerHTML = `<a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="rename-col">Renomear</a>
                           <a href="#" class="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" id="remove-col">Remover Coluna</a>`;
         document.body.appendChild(menu);
-
         document.getElementById('rename-col').onclick = (e) => { e.preventDefault(); renameColumn(columnName); menu.remove(); };
         document.getElementById('remove-col').onclick = (e) => { e.preventDefault(); removeColumn(columnName); menu.remove(); };
-        
         document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.remove(); }, { once: true });
     }
     
@@ -268,15 +255,12 @@ Function Get-HtmlTemplate {
     function addCalculatedColumn() {
         const newName = prompt("Nome da nova coluna:");
         if (!newName || !newName.trim()) return;
-
         const formula = prompt(`Digite a fórmula. Use 'row' para acessar os dados da linha (ex: row.Valor * 1.1).\nColunas: ${columnStructure.map(c=>c.originalName).join(', ')}`);
         if (!formula) return;
-        
         try {
             const calcFunc = new Function('row', `try { return ${formula}; } catch(e) { return 'ERRO'; }`);
             currentData.forEach(row => { row[newName] = calcFunc(row); });
             originalData.forEach(row => { row[newName] = calcFunc(row); });
-
             columnStructure.push({ originalName: newName, displayName: newName });
             renderTable();
             updateStatus();
@@ -288,8 +272,8 @@ Function Get-HtmlTemplate {
         const condition = document.getElementById('filter-condition').value;
         const value = document.getElementById('filter-value').value.toLowerCase();
         
-        if (!column) return;
         currentData = originalData.filter(row => {
+            if (!column) return true;
             const cellValue = String(row[column] || '').toLowerCase();
             const numCellValue = parseFloat(String(row[column]).replace(',', '.'));
             const numValue = parseFloat(String(value).replace(',', '.'));
@@ -306,11 +290,11 @@ Function Get-HtmlTemplate {
         Object.keys(sortState).forEach(key => delete sortState[key]);
         renderTable();
         updateStatus();
-        if(close) closeModal('filter-modal');
+        if(close) document.getElementById('filter-modal').classList.add('hidden');
     }
 
     function removeFilter() {
-        currentData = [...originalData];
+        currentData = JSON.parse(JSON.stringify(originalData));
         document.getElementById('filter-value').value = '';
         Object.keys(sortState).forEach(key => delete sortState[key]);
         renderTable();
@@ -339,29 +323,23 @@ Function Get-HtmlTemplate {
     }
 
     function setupEventListeners() {
-        document.getElementById('btn-filter').addEventListener('click', () => showModal('filter-modal'));
+        document.getElementById('btn-filter').addEventListener('click', () => document.getElementById('filter-modal').classList.remove('hidden'));
         document.getElementById('btn-add-column').addEventListener('click', addCalculatedColumn);
         document.getElementById('btn-remove-filter').addEventListener('click', removeFilter);
         document.getElementById('btn-download-csv').addEventListener('click', downloadCSV);
-        document.getElementById('btn-view-charts').addEventListener('click', () => showModal('charts-modal'));
+        document.getElementById('btn-toggle-charts').addEventListener('click', () => {
+            const chartsSection = document.getElementById('charts-section');
+            chartsSection.classList.toggle('hidden');
+            if (!chartsSection.classList.contains('hidden') && !chartsSection.dataset.initialized) {
+               initializeChartUI();
+               chartsSection.dataset.initialized = 'true';
+            }
+        });
         document.getElementById('apply-filter-btn').addEventListener('click', () => applyFilter(true));
-        document.querySelectorAll('.modal-close').forEach(el => el.addEventListener('click', () => closeModal(el.closest('.modal').id)));
+        document.querySelectorAll('.modal-close').forEach(el => el.addEventListener('click', () => el.closest('.modal').classList.add('hidden')));
         
         const filterColumnSelect = document.getElementById('filter-column');
         columnStructure.forEach(col => filterColumnSelect.add(new Option(col.displayName, col.originalName)));
-    }
-
-    function showModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if(modalId === 'charts-modal' && !modal.dataset.initialized) {
-           initializeChartUI();
-           modal.dataset.initialized = 'true';
-        }
-        modal.classList.remove('hidden');
-    }
-
-    function closeModal(modalId) {
-        document.getElementById(modalId).classList.add('hidden');
     }
     
     // --- Lógica dos Gráficos ---
@@ -388,24 +366,10 @@ Function Get-HtmlTemplate {
             div.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end';
             div.innerHTML = `
                 <div><label class="text-xs font-semibold">Eixo X / Grupo:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
-                <div>
-                    <label class="text-xs font-semibold">Eixo Y / Valor:</label>
-                    <div class="flex space-x-1">
-                        <select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select>
-                        <select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm">
-                            <option value="sum">Soma</option>
-                            <option value="avg">Média</option>
-                            <option value="count">Contagem</option>
-                            <option value="min">Mínimo</option>
-                            <option value="max">Máximo</option>
-                        </select>
-                    </div>
-                </div>
+                <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option></select></div></div>
                 <div class="combo-type-control hidden"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
-                <div class="flex items-end space-x-2">
-                    <div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="${seriesColors[(seriesCounter-1) % seriesColors.length]}" name="color" class="mt-1 w-full h-9 p-0 border-0 bg-white rounded-md"></div>
-                    ${!isFirst ? `<button type="button" class="remove-series-btn h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600">&times;</button>` : ''}
-                </div>`;
+                <div class="flex items-end space-x-2"><div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="${seriesColors[(seriesCounter-1) % seriesColors.length]}" name="color" class="mt-1 w-full h-9 p-0 border-0 bg-white rounded-md"></div>
+                    ${!isFirst ? `<button type="button" class="remove-series-btn h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600">&times;</button>` : ''}</div>`;
             document.getElementById('series-container').appendChild(div);
             populateSelect(div.querySelector('[name="x-axis"]'), 'all');
             populateSelect(div.querySelector('[name="y-axis"]'), 'numeric');
@@ -426,8 +390,7 @@ Function Get-HtmlTemplate {
                         display: document.getElementById('show-labels').checked,
                         color: fontColor,
                         font: { size: parseInt(document.getElementById('label-size').value) || 12 },
-                        align: labelPos,
-                        anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'),
+                        align: labelPos, anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'),
                         formatter: val => typeof val === 'number' ? val.toLocaleString('pt-BR') : val
                     }
                 },
@@ -442,20 +405,17 @@ Function Get-HtmlTemplate {
              if (chartInstance) chartInstance.destroy();
              const chartType = document.querySelector('input[name="chart-type"]:checked').value;
              document.querySelectorAll('.combo-type-control').forEach(el => el.style.display = chartType === 'combo' ? 'block' : 'none');
-
              const seriesControls = document.querySelectorAll('#series-container > div');
              if (seriesControls.length === 0) return;
-             
              const parseValue = v => parseFloat(String(v || '0').replace(',', '.')) || 0;
              const firstXAxis = seriesControls[0].querySelector('[name="x-axis"]').value;
-             const labels = [...new Set(currentData.map(d => d[firstXAxis]))].sort();
+             const labels = [...new Set(currentData.map(d => d[firstXAxis]))].sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
 
              const datasets = Array.from(seriesControls).map(control => {
                 const yCol = control.querySelector('[name="y-axis"]').value;
                 const xCol = control.querySelector('[name="x-axis"]').value;
                 const agg = control.querySelector('[name="aggregation"]').value;
                 const seriesTypeOption = control.querySelector('[name="series-type"]').value;
-
                 let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
                 
                 const data = labels.map(label => {
@@ -470,23 +430,18 @@ Function Get-HtmlTemplate {
                         default: return 0;
                     }
                 });
-
                 return {
-                    label: columnStructure.find(c => c.originalName === yCol).displayName,
-                    data: data,
-                    borderColor: control.querySelector('[name="color"]').value,
-                    backgroundColor: control.querySelector('[name="color"]').value + 'B3',
-                    type: seriesType,
+                    label: `${columnStructure.find(c=>c.originalName === yCol).displayName} (${agg})`,
+                    data: data, borderColor: control.querySelector('[name="color"]').value,
+                    backgroundColor: control.querySelector('[name="color"]').value + 'B3', type: seriesType,
                     tension: parseFloat(document.getElementById('line-interpolation').value) || 0.4,
                     borderRadius: parseInt(document.getElementById('bar-border-radius').value) || 0
                 };
              });
-
              const options = buildChartOptions();
              options.indexAxis = chartType === 'horizontalBar' ? 'y' : 'x';
              options.scales.x.stacked = chartType === 'stacked';
              options.scales.y.stacked = chartType === 'stacked';
-             
              chartInstance = new Chart('mainChart', { type: 'bar', data: { labels, datasets }, options });
         };
         
@@ -499,7 +454,10 @@ Function Get-HtmlTemplate {
         };
 
         addSeriesControl(true);
-        document.getElementById('charts-controls-panel').addEventListener('change', renderChart);
+        document.getElementById('charts-section').addEventListener('change', renderChart);
+        document.getElementById('charts-section').addEventListener('input', (e) => {
+            if(e.target.type === 'number') renderChart(); // Live update for number inputs
+        });
         document.getElementById('add-series-btn').addEventListener('click', () => addSeriesControl(false));
         document.getElementById('download-chart-btn').addEventListener('click', downloadChart);
         document.getElementById('y-axis-auto').onchange = e => { document.getElementById('y-axis-max').disabled = e.target.checked; };
@@ -519,9 +477,10 @@ Function Get-HtmlTemplate {
     <style>
         .modal { transition: opacity 0.25s ease; }
         #table-container { max-height: calc(100vh - 140px); overflow: auto; }
-        table thead { position: sticky; top: 0; z-index: 1; }
+        table thead { position: sticky; top: 0; z-index: 10; }
         .chart-selector input:checked + label { border-color: #3b82f6; background-color: #eff6ff; box-shadow: 0 0 0 2px #3b82f6; }
         .divider { border-top: 1px solid #e5e7eb; margin-top: 1rem; margin-bottom: 1rem; }
+        #charts-section { scroll-margin-top: 80px; }
     </style>
     <script>$($EmbeddedLibraries.Tailwind)</script>
 </head>
@@ -536,79 +495,79 @@ Function Get-HtmlTemplate {
                 <button id="btn-filter" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">Filtrar</button>
                 <button id="btn-add-column" class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">Coluna Calculada</button>
                 <button id="btn-remove-filter" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300">Remover Filtro</button>
-                <button id="btn-view-charts" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">Visualizar Gráficos</button>
+                <button id="btn-toggle-charts" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">Análise Gráfica</button>
                 <button id="btn-download-csv" class="px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded-md hover:bg-gray-900">Baixar CSV</button>
             </div>
         </div>
     </header>
 
-    <main class="container mx-auto p-4"><div id="table-container" class="bg-white rounded-lg shadow overflow-hidden"></div></main>
-    <footer class="fixed bottom-0 left-0 right-0 bg-gray-800 text-white text-sm p-2 text-center"><span id="status-label">Carregando...</span></footer>
+    <main class="container mx-auto p-4">
+        <div id="table-container" class="bg-white rounded-lg shadow overflow-hidden"></div>
+        
+        <section id="charts-section" class="hidden mt-6 bg-white rounded-lg shadow">
+             <div class="p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Visualização de Gráficos</h2>
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                    <div class="lg:col-span-1 flex flex-col space-y-4">
+                        <div>
+                            <h3 class="font-bold text-gray-700 mb-2">1. Tipo de Gráfico</h3>
+                            <div class="chart-selector grid grid-cols-3 gap-2">
+                                <div><input type="radio" name="chart-type" value="bar" id="type-bar" checked class="hidden"><label for="type-bar" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Barra</label></div>
+                                <div><input type="radio" name="chart-type" value="line" id="type-line" class="hidden"><label for="type-line" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Linha</label></div>
+                                <div><input type="radio" name="chart-type" value="combo" id="type-combo" class="hidden"><label for="type-combo" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Combo</label></div>
+                                <div><input type="radio" name="chart-type" value="stacked" id="type-stacked" class="hidden"><label for="type-stacked" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Empilhado</label></div>
+                                <div><input type="radio" name="chart-type" value="horizontalBar" id="type-horizontalBar" class="hidden"><label for="type-horizontalBar" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Horizontal</label></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">2. Séries de Dados</h3><button id="add-series-btn" class="text-xs bg-blue-500 text-white py-1 px-2 rounded-full hover:bg-blue-600">+ Série</button></div>
+                            <div id="series-container" class="space-y-3 max-h-60 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                    <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4"><div class="relative w-full h-full min-h-[400px]"><canvas id="mainChart"></canvas></div></div>
+                    <div class="lg:col-span-1 flex flex-col space-y-2 text-sm">
+                        <h3 class="font-bold text-gray-700 mb-2">3. Formatar Visual</h3>
+                        <div><span class="font-semibold text-gray-700">Rótulos de Dados</span>
+                            <div class="flex items-center mt-2"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300"><label for="show-labels" class="ml-2 text-gray-900">Exibir rótulos</label></div>
+                            <div class="mt-2 space-y-2">
+                                <div><label for="label-position" class="text-xs text-gray-600">Posição:</label><select id="label-position" class="mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="end">Topo/Direita</option><option value="center">Centro</option><option value="start">Base/Esquerda</option></select></div>
+                                <div><label for="label-size" class="text-xs text-gray-600">Tamanho Fonte:</label><input type="number" id="label-size" value="12" class="mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                            </div>
+                        </div>
+                        <div class="divider"></div>
+                        <div><span class="font-semibold text-gray-700">Opções de Barra</span>
+                            <div class="mt-2"><label for="bar-border-radius" class="text-xs text-gray-600">Arredondamento da Borda:</label><input type="number" id="bar-border-radius" value="0" min="0" class="mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                        </div>
+                        <div class="divider"></div>
+                        <div><span class="font-semibold text-gray-700">Opções de Linha</span>
+                            <div class="mt-2"><label for="line-interpolation" class="text-xs text-gray-600">Interpolação:</label><select id="line-interpolation" class="mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="0.0">Linear</option><option value="0.4" selected>Suave</option><option value="1.0">Curva Máxima</option></select></div>
+                        </div>
+                        <div class="divider"></div>
+                        <div><span class="font-semibold text-gray-700">Eixos e Grade</span>
+                            <div class="flex items-center mt-2"><input id="show-grid" type="checkbox" checked class="h-4 w-4 rounded border-gray-300"><label for="show-grid" class="ml-2 text-gray-900">Exibir grades</label></div>
+                            <div class="flex items-center mt-2"><input id="y-axis-auto" type="checkbox" checked class="h-4 w-4 rounded border-gray-300"><label for="y-axis-auto" class="ml-2 text-gray-900">Eixo Y Automático</label></div>
+                            <input type="number" id="y-axis-max" placeholder="Ex: 100" disabled class="mt-1 block w-full rounded-md border-gray-300 text-xs disabled:bg-gray-100">
+                        </div>
+                        <div class="divider"></div>
+                        <div>
+                             <h3 class="font-bold text-gray-700 mb-2">4. Ações</h3>
+                             <button id="download-chart-btn" class="w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
 
     <div id="filter-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-30">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Filtrar Dados</h3>
-            <div class="space-y-4">
+            <div class="flex justify-between items-center"><h3 class="text-lg font-medium text-gray-900">Filtrar Dados</h3><button class="modal-close font-bold text-xl">&times;</button></div>
+            <div class="mt-4 space-y-4">
                 <div><label for="filter-column" class="block text-sm font-medium text-gray-700">Coluna</label><select id="filter-column" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm"></select></div>
                 <div><label for="filter-condition" class="block text-sm font-medium text-gray-700">Condição</label><select id="filter-condition" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm"><option value="contains">Contém</option><option value="not_contains">Não Contém</option><option value="equals">Igual a</option><option value="not_equals">Diferente de</option><option value="greater">Maior que (numérico)</option><option value="less">Menor que (numérico)</option></select></div>
                 <div><label for="filter-value" class="block text-sm font-medium text-gray-700">Valor</label><input type="text" id="filter-value" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
             </div>
             <div class="mt-6 flex justify-end space-x-2"><button class="modal-close px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancelar</button><button id="apply-filter-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Aplicar</button></div>
-        </div>
-    </div>
-    
-    <div id="charts-modal" class="modal hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-40 p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full h-full max-w-7xl flex flex-col p-6 relative">
-            <button class="modal-close absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
-            <h2 class="text-2xl font-bold text-gray-800 mb-4">Visualização de Gráficos</h2>
-            <div class="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 overflow-hidden">
-                <div id="charts-controls-panel" class="lg:col-span-1 flex flex-col space-y-4 overflow-y-auto pr-2">
-                    <div>
-                        <h3 class="font-bold text-gray-700 mb-2">1. Tipo de Gráfico</h3>
-                        <div class="chart-selector grid grid-cols-3 gap-2">
-                            <div><input type="radio" name="chart-type" value="bar" id="type-bar" checked class="hidden"><label for="type-bar" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Barra</label></div>
-                            <div><input type="radio" name="chart-type" value="line" id="type-line" class="hidden"><label for="type-line" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Linha</label></div>
-                            <div><input type="radio" name="chart-type" value="combo" id="type-combo" class="hidden"><label for="type-combo" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Combo</label></div>
-                            <div><input type="radio" name="chart-type" value="stacked" id="type-stacked" class="hidden"><label for="type-stacked" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Empilhado</label></div>
-                            <div><input type="radio" name="chart-type" value="horizontalBar" id="type-horizontalBar" class="hidden"><label for="type-horizontalBar" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Horizontal</label></div>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">2. Séries de Dados</h3><button id="add-series-btn" class="text-xs bg-blue-500 text-white py-1 px-2 rounded-full hover:bg-blue-600">+ Série</button></div>
-                        <div id="series-container" class="space-y-3 max-h-60 overflow-y-auto"></div>
-                    </div>
-                </div>
-                <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4"><div class="relative w-full h-full"><canvas id="mainChart"></canvas></div></div>
-                <div class="lg:col-span-1 flex flex-col space-y-2 overflow-y-auto pr-2 text-sm">
-                    <h3 class="font-bold text-gray-700 mb-2">3. Formatar Visual</h3>
-                    <div><span class="font-semibold text-gray-700">Rótulos de Dados</span>
-                        <div class="flex items-center mt-2"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300"><label for="show-labels" class="ml-2 text-gray-900">Exibir rótulos</label></div>
-                        <div class="mt-2 space-y-2">
-                            <div><label for="label-position" class="text-xs text-gray-600">Posição:</label><select id="label-position" class="mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="end">Topo/Direita</option><option value="center">Centro</option><option value="start">Base/Esquerda</option></select></div>
-                            <div><label for="label-size" class="text-xs text-gray-600">Tamanho Fonte:</label><input type="number" id="label-size" value="12" class="mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
-                        </div>
-                    </div>
-                    <div class="divider"></div>
-                    <div><span class="font-semibold text-gray-700">Opções de Barra</span>
-                        <div class="mt-2"><label for="bar-border-radius" class="text-xs text-gray-600">Arredondamento da Borda:</label><input type="number" id="bar-border-radius" value="0" min="0" class="mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
-                    </div>
-                    <div class="divider"></div>
-                    <div><span class="font-semibold text-gray-700">Opções de Linha</span>
-                        <div class="mt-2"><label for="line-interpolation" class="text-xs text-gray-600">Interpolação:</label><select id="line-interpolation" class="mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="0.0">Linear</option><option value="0.4" selected>Suave</option><option value="1.0">Curva Máxima</option></select></div>
-                    </div>
-                    <div class="divider"></div>
-                    <div><span class="font-semibold text-gray-700">Eixos e Grade</span>
-                        <div class="flex items-center mt-2"><input id="show-grid" type="checkbox" checked class="h-4 w-4 rounded border-gray-300"><label for="show-grid" class="ml-2 text-gray-900">Exibir grades</label></div>
-                        <div class="flex items-center mt-2"><input id="y-axis-auto" type="checkbox" checked class="h-4 w-4 rounded border-gray-300"><label for="y-axis-auto" class="ml-2 text-gray-900">Eixo Y Automático</label></div>
-                        <input type="number" id="y-axis-max" placeholder="Ex: 100" disabled class="mt-1 block w-full rounded-md border-gray-300 text-xs disabled:bg-gray-100">
-                    </div>
-                    <div class="divider"></div>
-                    <div>
-                         <h3 class="font-bold text-gray-700 mb-2">4. Ações</h3>
-                         <button id="download-chart-btn" class="w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
