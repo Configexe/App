@@ -1,15 +1,18 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 4.6.0 - Eixos Flexíveis e Agregação Opcional
+# Versão: 4.7.0 - Agrupamento Dinâmico de Séries
 # Autor: jefferson/configexe (com modernização por IA)
 #
-# Melhorias da Versão 4.6.0:
-# - NOVO RECURSO: O seletor do Eixo Y agora lista todas as colunas (texto e
-#   números), permitindo o uso de dados categóricos para contagens ou para
-#   plotar dados pré-agregados.
-# - NOVO RECURSO: Adicionada a opção 'Nenhum' ao seletor de agregação de dados
-#   (Soma, Média, etc.). Quando selecionada, o gráfico plota o valor direto da
-#   fonte de dados, sem aplicar cálculos.
+# Melhorias da Versão 4.7.0:
+# - NOVO RECURSO: Adicionado o campo "Agrupar Por" nas opções do gráfico.
+#   Agora é possível selecionar uma coluna (ex: "Região", "Produto") para
+#   dividir os dados em múltiplas séries dinamicamente no mesmo gráfico.
+# - MELHORIA DE USABILIDADE: A interface foi reorganizada para incluir o novo
+#   passo de agrupamento. Ao agrupar, as cores são distribuídas
+#   automaticamente entre as séries geradas.
+# - INTELIGÊNCIA: Quando o modo "Agrupar Por" está ativo, as configurações
+#   (Eixo Y, agregação) da primeira série de dados são usadas como base para
+#   todas as séries geradas.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -48,7 +51,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v4.6.0 com Eixos Flexíveis)
+    // Power-Graphx Web App - Lógica Principal (v4.7.0 com Agrupamento)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -420,11 +423,17 @@ Function Get-HtmlTemplate {
         if (!section || !data || data.length === 0) return;
         const cols = Object.keys(data[0]).map(name => ({ originalName: name, displayName: name }));
         
+        // Popula o seletor de Agrupamento
+        const groupBySelect = section.querySelector('select[name="group-by"]');
+        const currentGroupBy = groupBySelect.value;
+        groupBySelect.innerHTML = '<option value="">-- Nenhum --</option>';
+        cols.forEach(c => groupBySelect.add(new Option(c.displayName, c.originalName)));
+        if(cols.find(c => c.originalName === currentGroupBy)) groupBySelect.value = currentGroupBy;
+
         section.querySelectorAll('.series-control').forEach(series => {
             const xAxisSelect = series.querySelector('select[name="x-axis"]'), yAxisSelect = series.querySelector('select[name="y-axis"]');
             const currentX = xAxisSelect.value, currentY = yAxisSelect.value;
             
-            // Popula X e Y com TODAS as colunas
             xAxisSelect.innerHTML = '';
             cols.forEach(c => xAxisSelect.add(new Option(c.displayName, c.originalName)));
             if (cols.find(c => c.originalName === currentX)) xAxisSelect.value = currentX;
@@ -470,7 +479,7 @@ Function Get-HtmlTemplate {
         const newSeries = document.createElement('div');
         newSeries.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end series-control';
         newSeries.innerHTML = `
-            <div><label class="text-xs font-semibold">Eixo X / Grupo:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
+            <div><label class="text-xs font-semibold">Eixo X / Categoria:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
             <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="none" selected>Nenhum</option><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option></select></div></div>
             <div class="sm:col-span-2"><label class="text-xs font-semibold">Nome da Série (Legenda):</label><input type="text" name="series-label" class="mt-1 block w-full rounded-md border-gray-300 text-sm" placeholder="Opcional. Ex: Total de Vendas"></div>
             <div class="combo-type-control" style="display: none;"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
@@ -507,48 +516,80 @@ Function Get-HtmlTemplate {
         section.querySelectorAll('.combo-type-control').forEach(el => el.style.display = chartType === 'combo' ? 'block' : 'none');
         const seriesControls = section.querySelectorAll('.series-control');
         if (seriesControls.length === 0) return;
+
         const firstXAxis = seriesControls[0].querySelector('[name="x-axis"]').value;
-        if (!firstXAxis) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            return;
-        }
+        if (!firstXAxis) { ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
+        
         const labels = [...new Set(chartData.map(d => d[firstXAxis]))].sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
-        const datasets = Array.from(seriesControls).map(control => {
-            const yCol = control.querySelector('[name="y-axis"]').value, xCol = control.querySelector('[name="x-axis"]').value, agg = control.querySelector('[name="aggregation"]').value;
-            const customLabel = control.querySelector('input[name="series-label"]').value, seriesTypeOption = control.querySelector('[name="series-type"]').value;
-            let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
-            
-            const data = labels.map(label => {
-                const groupData = chartData.filter(d => d[xCol] == label);
-                if (groupData.length === 0) return 0;
+        let datasets = [];
+        const groupingColumn = section.querySelector('select[name="group-by"]').value;
+        const colorPalette = ['#3b82f6', '#ef4444', '#22c55e', '#f97316', '#8b5cf6', '#ec4899', '#14b8a6', '#eab308'];
+
+        if (groupingColumn) {
+            const uniqueGroups = [...new Set(chartData.map(d => d[groupingColumn]))].sort();
+            const control = seriesControls[0]; // Use first series control as template
+            uniqueGroups.forEach((groupValue, index) => {
+                const groupFilteredData = chartData.filter(d => d[groupingColumn] == groupValue);
+                const yCol = control.querySelector('[name="y-axis"]').value, xCol = control.querySelector('[name="x-axis"]').value, agg = control.querySelector('[name="aggregation"]').value;
+                const seriesTypeOption = control.querySelector('[name="series-type"]').value;
+                let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
                 
-                switch(agg) {
-                    case 'count':
-                        return groupData.length;
-                    case 'none': {
-                        const firstValue = groupData[0][yCol];
-                        return parseFloat(String(firstValue || '0').replace(',', '.')) || 0;
+                const data = labels.map(label => {
+                    const groupDataForLabel = groupFilteredData.filter(d => d[xCol] == label);
+                    if (groupDataForLabel.length === 0) return 0;
+                    switch(agg) {
+                        case 'count': return groupDataForLabel.length;
+                        case 'none': return parseFloat(String(groupDataForLabel[0][yCol] || '0').replace(',', '.')) || 0;
+                        default:
+                            const numericValues = groupDataForLabel.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0);
+                            if (numericValues.length === 0) return 0;
+                            switch(agg) {
+                                case 'sum': return numericValues.reduce((a, b) => a + b, 0);
+                                case 'avg': return numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+                                case 'min': return Math.min(...numericValues);
+                                case 'max': return Math.max(...numericValues);
+                                default: return 0;
+                            }
                     }
-                    default: { // sum, avg, min, max
-                        const numericValues = groupData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0);
-                        if (numericValues.length === 0) return 0;
-                        switch(agg) {
-                            case 'sum': return numericValues.reduce((a, b) => a + b, 0);
-                            case 'avg': return numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
-                            case 'min': return Math.min(...numericValues);
-                            case 'max': return Math.max(...numericValues);
-                            default: return 0;
-                        }
-                    }
-                }
+                });
+
+                const color = colorPalette[index % colorPalette.length];
+                datasets.push({
+                    label: groupValue, data: data, borderColor: color, backgroundColor: color + 'B3', type: seriesType,
+                    tension: parseFloat(section.querySelector('.line-interpolation').value) || 0.4,
+                    borderRadius: parseInt(section.querySelector('.bar-border-radius').value) || 0
+                });
             });
-            return {
-                label: customLabel.trim() || `${yCol} (${agg})`, data: data, borderColor: control.querySelector('[name="color"]').value,
-                backgroundColor: control.querySelector('[name="color"]').value + 'B3', type: seriesType,
-                tension: parseFloat(section.querySelector('.line-interpolation').value) || 0.4,
-                borderRadius: parseInt(section.querySelector('.bar-border-radius').value) || 0
-            };
-        });
+        } else {
+             datasets = Array.from(seriesControls).map(control => {
+                const yCol = control.querySelector('[name="y-axis"]').value, xCol = control.querySelector('[name="x-axis"]').value, agg = control.querySelector('[name="aggregation"]').value;
+                const customLabel = control.querySelector('input[name="series-label"]').value, seriesTypeOption = control.querySelector('[name="series-type"]').value;
+                let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
+                const data = labels.map(label => {
+                    const groupData = chartData.filter(d => d[xCol] == label);
+                    if (groupData.length === 0) return 0;
+                    switch(agg) {
+                        case 'count': return groupData.length;
+                        case 'none': return parseFloat(String(groupData[0][yCol] || '0').replace(',', '.')) || 0;
+                        default:
+                            const numericValues = groupData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0);
+                            if (numericValues.length === 0) return 0;
+                            switch(agg) {
+                                case 'sum': return numericValues.reduce((a, b) => a + b, 0);
+                                case 'avg': return numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+                                case 'min': return Math.min(...numericValues);
+                                case 'max': return Math.max(...numericValues);
+                                default: return 0;
+                            }
+                    }
+                });
+                return {
+                    label: customLabel.trim() || `${yCol} (${agg})`, data: data, borderColor: control.querySelector('[name="color"]').value, backgroundColor: control.querySelector('[name="color"]').value + 'B3', type: seriesType,
+                    tension: parseFloat(section.querySelector('.line-interpolation').value) || 0.4,
+                    borderRadius: parseInt(section.querySelector('.bar-border-radius').value) || 0
+                };
+            });
+        }
 
         const fontColor = '#64748B', gridColor = section.querySelector('.show-grid').checked ? 'rgba(0, 0, 0, 0.1)' : 'transparent';
         const yAxisAuto = section.querySelector('.y-axis-auto').checked, yAxisMax = parseFloat(section.querySelector('.y-axis-max').value);
@@ -558,17 +599,9 @@ Function Get-HtmlTemplate {
             plugins: {
                 title: { display: !!chartTitle, text: chartTitle, font: { size: 18 } },
                 subtitle: { display: !!chartSubtitle, text: chartSubtitle, padding: { bottom: 10 } },
-                datalabels: {
-                    display: section.querySelector('.show-labels').checked, color: fontColor,
-                    font: { size: parseInt(section.querySelector('.label-size').value) || 12 },
-                    align: labelPos, anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'),
-                    formatter: val => typeof val === 'number' ? val.toLocaleString('pt-BR') : val
-                }
+                datalabels: { display: section.querySelector('.show-labels').checked, color: fontColor, font: { size: parseInt(section.querySelector('.label-size').value) || 12 }, align: labelPos, anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'), formatter: val => typeof val === 'number' ? val.toLocaleString('pt-BR') : val }
             },
-            scales: {
-                x: { ticks: { color: fontColor }, grid: { color: gridColor }, stacked: chartType === 'stacked' },
-                y: { beginAtZero: true, ticks: { color: fontColor }, grid: { color: gridColor }, max: yAxisAuto ? undefined : yAxisMax, stacked: chartType === 'stacked' }
-            },
+            scales: { x: { ticks: { color: fontColor }, grid: { color: gridColor }, stacked: chartType === 'stacked' }, y: { beginAtZero: true, ticks: { color: fontColor }, grid: { color: gridColor }, max: yAxisAuto ? undefined : yAxisMax, stacked: chartType === 'stacked' } },
             indexAxis: chartType === 'horizontalBar' ? 'y' : 'x'
         };
         chartInstances[id] = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options });
@@ -628,7 +661,7 @@ Function Get-HtmlTemplate {
                  <div class="md:col-span-3">
                      <h2 class="text-2xl font-bold text-gray-800 mb-2">Console SQL (AlaSQL)</h2>
                      <div class="flex items-center space-x-2 mb-4">
-                        <p class="text-sm text-gray-600">Exemplo: code>SELECT * FROM source_data LIMIT 10;</code></p>
+                        <p class="text-sm text-gray-600">Exemplo: <code>SELECT * FROM source_data LIMIT 10;</code></p>
                      </div>
                      <textarea id="sql-editor" class="w-full h-32 p-2 font-mono text-sm border border-gray-300 rounded-md" placeholder="SELECT * FROM source_data;">SELECT * FROM source_data;</textarea>
                  </div>
@@ -680,14 +713,18 @@ Function Get-HtmlTemplate {
                                   <div><input type="radio" name="chart-type-__ID__" value="horizontalBar" id="type-horizontalBar-__ID__" class="hidden"><label for="type-horizontalBar-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Horizontal</label></div>
                               </div>
                           </div>
+                           <div>
+                              <h3 class="font-bold text-gray-700 mb-2">3. Agrupar Por (Opcional)</h3>
+                              <select name="group-by" class="group-by-select mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="">-- Nenhum --</option></select>
+                          </div>
                           <div>
-                              <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">3. Séries de Dados</h3><button class="add-series-btn text-xs bg-blue-500 text-white py-1 px-2 rounded-full hover:bg-blue-600">+ Série</button></div>
+                              <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">4. Séries de Dados</h3><button class="add-series-btn text-xs bg-blue-500 text-white py-1 px-2 rounded-full hover:bg-blue-600">+ Série</button></div>
                               <div id="series-container-__ID__" class="space-y-3 max-h-60 overflow-y-auto"></div>
                           </div>
                       </div>
                       <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4"><div class="relative w-full h-full min-h-[400px]"><canvas id="mainChart-__ID__"></canvas></div></div>
                       <div class="lg:col-span-1 flex flex-col space-y-2 text-sm">
-                          <h3 class="font-bold text-gray-700 mb-2">4. Formatar Visual</h3>
+                          <h3 class="font-bold text-gray-700 mb-2">5. Formatar Visual</h3>
                           <div><span class="font-semibold text-gray-700">Títulos</span>
                                <div class="mt-2 space-y-2">
                                    <div><label class="text-xs text-gray-600">Título:</label><input type="text" placeholder="Título do Gráfico" class="chart-title-input mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
@@ -715,7 +752,7 @@ Function Get-HtmlTemplate {
                           </div>
                           <div class="divider"></div>
                           <div>
-                              <h3 class="font-bold text-gray-700 mb-2">5. Ações</h3>
+                              <h3 class="font-bold text-gray-700 mb-2">6. Ações</h3>
                               <button class="download-chart-btn w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
                           </div>
                       </div>
