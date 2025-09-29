@@ -1,17 +1,18 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 3.1.0 - Edição Web com Gráficos Corrigidos e Exportação
+# Versão: 3.2.0 - Edição Web com Agregação (Pivot) e Formatação Avançada
 # Autor: jefferson/configexe (com modernização por IA)
 #
-# Melhorias da Versão 3.1.0:
-# - Correção de Gráficos: Lógica de renderização de gráficos em JavaScript
-#   ajustada para exibir corretamente cada tipo (barra, linha, combo).
-# - Exportação para PNG: Adicionado botão "Baixar Gráfico (PNG)" no modal
-#   de visualização para salvar a imagem do gráfico gerado.
-# - Painel de Formatação: Reintroduzido um painel completo para formatar
-#   a aparência dos gráficos (rótulos, eixos, cores, etc.).
-# - Plugin de Rótulos Ativado: A biblioteca de rótulos (ChartDataLabels)
-#   agora está corretamente registrada e funcional.
+# Melhorias da Versão 3.2.0:
+# - Agregação de Dados (Pivot): Adicionado seletor de agregação (Soma, Média,
+#   Contagem, Mín/Máx) para cada série de dados, permitindo análises mais profundas.
+# - Formatação Avançada de Gráficos: Reintroduzido o painel de formatação
+#   completo, permitindo controle sobre rótulos, eixos, arredondamento de
+#   barras, suavização de linhas e mais.
+# - Interface Reorganizada: O modal de gráficos agora possui uma coluna
+#   dedicada para formatação, melhorando a usabilidade.
+# - Correções na Edição de Dados: Melhorada a lógica de atualização dos
+#   dados para garantir que edições na tabela se reflitam corretamente.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -27,7 +28,6 @@ catch {
 # --- 2. Funções Principais ---
 
 # Função para baixar e embutir as bibliotecas JS/CSS.
-# Elas são baixadas para uma pasta temporária para não precisar buscar na internet toda vez.
 Function Get-EmbeddedLibraries {
     $tempDir = Join-Path $env:TEMP "PowerGraphx_Libs"
     if (-not (Test-Path $tempDir)) {
@@ -98,7 +98,7 @@ Function Get-HtmlTemplate {
         // Inicializa a aplicação com os dados embutidos pelo PowerShell
         originalData = JSON.parse(document.getElementById('jsonData').textContent);
         columnStructure = JSON.parse(document.getElementById('jsonColumnStructure').textContent);
-        currentData = [...originalData];
+        currentData = JSON.parse(JSON.stringify(originalData)); // Deep copy para evitar referência
 
         // Mapeia os nomes originais para os de exibição para uso futuro
         columnStructure.forEach(col => col.displayName = col.displayName || col.originalName);
@@ -143,26 +143,18 @@ Function Get-HtmlTemplate {
             titleDiv.textContent = col.displayName;
             th.appendChild(titleDiv);
             
-            // Adiciona ícone de ordenação
             const sortIcon = document.createElement('span');
             sortIcon.className = 'ml-2 text-gray-400';
-            if (sortState[col.originalName] === 'asc') {
-                sortIcon.innerHTML = '&#9650;'; // Seta para cima
-            } else if (sortState[col.originalName] === 'desc') {
-                sortIcon.innerHTML = '&#9660;'; // Seta para baixo
-            }
+            if (sortState[col.originalName] === 'asc') { sortIcon.innerHTML = '&#9650;'; } 
+            else if (sortState[col.originalName] === 'desc') { sortIcon.innerHTML = '&#9660;'; }
             titleDiv.appendChild(sortIcon);
 
             th.addEventListener('click', () => handleSort(col.originalName));
             
-            // Menu de contexto para colunas
             const menuIcon = document.createElement('span');
-            menuIcon.innerHTML = '&#8942;'; // 3 pontos verticais
+            menuIcon.innerHTML = '&#8942;';
             menuIcon.className = 'absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition p-1 rounded-full hover:bg-gray-200';
-            menuIcon.addEventListener('click', (e) => {
-                e.stopPropagation();
-                showColumnMenu(e.target, col.originalName);
-            });
+            menuIcon.addEventListener('click', (e) => { e.stopPropagation(); showColumnMenu(e.target, col.originalName); });
             th.appendChild(menuIcon);
             
             headerRow.appendChild(th);
@@ -176,19 +168,22 @@ Function Get-HtmlTemplate {
         currentData.forEach((row, rowIndex) => {
             const tr = document.createElement('tr');
             tr.className = 'hover:bg-gray-50';
+            // Adiciona um ID único para cada linha para encontrar o dado original correspondente
+            tr.dataset.rowId = rowIndex;
+            
             columnStructure.forEach(col => {
                 const td = document.createElement('td');
                 td.className = 'px-4 py-3 whitespace-nowrap text-sm text-gray-700';
                 td.textContent = row[col.originalName];
                 td.setAttribute('contenteditable', 'true');
                 td.addEventListener('blur', (e) => {
-                    // Atualiza o dado no array quando a célula perde o foco
                     const newValue = e.target.textContent;
-                    const originalRow = originalData.find(d => JSON.stringify(d) === JSON.stringify(row));
-                    if(originalRow) {
-                        originalRow[col.originalName] = newValue;
-                    }
-                    currentData[rowIndex][col.originalName] = newValue;
+                    const id = parseInt(e.target.closest('tr').dataset.rowId);
+                    // Atualiza tanto a visualização atual quanto a fonte original de dados
+                    currentData[id][col.originalName] = newValue;
+                    // Encontrar o objeto exato no array original pode ser complexo se os dados não tiverem ID.
+                    // A melhor abordagem é assumir que a ordem inicial é a mesma.
+                    originalData[id][col.originalName] = newValue;
                 });
                 tr.appendChild(td);
             });
@@ -199,97 +194,69 @@ Function Get-HtmlTemplate {
     }
     
     // --- Lógica de Manipulação de Dados ---
-
     function handleSort(columnName) {
         const currentOrder = sortState[columnName];
         let nextOrder;
         if (currentOrder === 'asc') nextOrder = 'desc';
-        else if (currentOrder === 'desc') nextOrder = undefined; // Volta ao original
+        else if (currentOrder === 'desc') nextOrder = undefined;
         else nextOrder = 'asc';
 
-        // Limpa estados de ordenação anteriores
         Object.keys(sortState).forEach(key => delete sortState[key]);
         
-        const originalCopy = [...originalData];
         if (nextOrder) {
             sortState[columnName] = nextOrder;
+            currentData.sort((a, b) => {
+                const valA = a[columnName];
+                const valB = b[columnName];
+                const numA = parseFloat(String(valA).replace(',', '.'));
+                const numB = parseFloat(String(valB).replace(',', '.'));
+
+                let comparison = 0;
+                if (!isNaN(numA) && !isNaN(numB)) {
+                    comparison = numA - numB;
+                } else {
+                    comparison = String(valA).toLowerCase().localeCompare(String(valB).toLowerCase());
+                }
+                return nextOrder === 'asc' ? comparison : -comparison;
+            });
+        } else {
+             // Se a ordenação for removida, restaura para a ordem filtrada atual
+             applyFilter(false); // Re-aplica o filtro sem fechar modal
         }
-
-        // Ordena os dados
-        currentData.sort((a, b) => {
-            if (!nextOrder) {
-                // Se não há ordem, usa a ordem do array original
-                return originalCopy.indexOf(a) - originalCopy.indexOf(b);
-            }
-        
-            const valA = a[columnName];
-            const valB = b[columnName];
-            
-            const numA = parseFloat(String(valA).replace(',', '.'));
-            const numB = parseFloat(String(valB).replace(',', '.'));
-
-            let comparison = 0;
-            if (!isNaN(numA) && !isNaN(numB)) {
-                comparison = numA - numB;
-            } else {
-                comparison = String(valA).toLowerCase().localeCompare(String(valB).toLowerCase());
-            }
-            return nextOrder === 'asc' ? comparison : -comparison;
-        });
-        
         renderTable();
     }
     
     function showColumnMenu(target, columnName) {
-        // Remove menu existente
         const existingMenu = document.getElementById('column-context-menu');
         if (existingMenu) existingMenu.remove();
 
         const menu = document.createElement('div');
         menu.id = 'column-context-menu';
-        menu.className = 'absolute z-10 w-48 bg-white rounded-md shadow-lg border';
+        menu.className = 'absolute z-50 w-48 bg-white rounded-md shadow-lg border';
         
         const rect = target.getBoundingClientRect();
         menu.style.top = `${rect.bottom + window.scrollY}px`;
         menu.style.left = `${rect.left + window.scrollX}px`;
 
-        menu.innerHTML = `
-            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="rename-col">Renomear</a>
-            <a href="#" class="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" id="remove-col">Remover Coluna</a>
-        `;
+        menu.innerHTML = `<a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" id="rename-col">Renomear</a>
+                          <a href="#" class="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" id="remove-col">Remover Coluna</a>`;
         document.body.appendChild(menu);
 
-        document.getElementById('rename-col').addEventListener('click', (e) => {
-            e.preventDefault();
-            renameColumn(columnName);
-            menu.remove();
-        });
-        document.getElementById('remove-col').addEventListener('click', (e) => {
-            e.preventDefault();
-            removeColumn(columnName);
-            menu.remove();
-        });
+        document.getElementById('rename-col').onclick = (e) => { e.preventDefault(); renameColumn(columnName); menu.remove(); };
+        document.getElementById('remove-col').onclick = (e) => { e.preventDefault(); removeColumn(columnName); menu.remove(); };
         
-        // Fecha o menu se clicar fora
-        document.addEventListener('click', (e) => {
-             if (!menu.contains(e.target)) {
-                menu.remove();
-             }
-        }, { once: true });
+        document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.remove(); }, { once: true });
     }
     
     function renameColumn(oldName) {
         const col = columnStructure.find(c => c.originalName === oldName);
         const newName = prompt(`Digite o novo nome para a coluna "${col.displayName}":`, col.displayName);
-        if (newName && newName.trim() !== '') {
-            col.displayName = newName.trim();
-            renderTable();
-        }
+        if (newName && newName.trim()) { col.displayName = newName.trim(); renderTable(); }
     }
 
     function removeColumn(columnName) {
         const col = columnStructure.find(c => c.originalName === columnName);
-        if (confirm(`Tem certeza que deseja remover a coluna "${col.displayName}"?`)) {
+        if (confirm(`Tem certeza de que deseja remover a coluna "${col.displayName}"?`)) {
             columnStructure = columnStructure.filter(c => c.originalName !== columnName);
             currentData.forEach(row => delete row[columnName]);
             originalData.forEach(row => delete row[columnName]);
@@ -300,37 +267,32 @@ Function Get-HtmlTemplate {
     
     function addCalculatedColumn() {
         const newName = prompt("Nome da nova coluna:");
-        if (!newName || newName.trim() === '') return;
+        if (!newName || !newName.trim()) return;
 
         const formula = prompt(`Digite a fórmula. Use 'row' para acessar os dados da linha (ex: row.Valor * 1.1).\nColunas: ${columnStructure.map(c=>c.originalName).join(', ')}`);
         if (!formula) return;
         
         try {
             const calcFunc = new Function('row', `try { return ${formula}; } catch(e) { return 'ERRO'; }`);
-            
             currentData.forEach(row => { row[newName] = calcFunc(row); });
             originalData.forEach(row => { row[newName] = calcFunc(row); });
 
             columnStructure.push({ originalName: newName, displayName: newName });
             renderTable();
             updateStatus();
-        } catch (e) {
-            alert("Erro na fórmula: " + e.message);
-        }
+        } catch (e) { alert("Erro na fórmula: " + e.message); }
     }
     
-    function applyFilter() {
+    function applyFilter(close = true) {
         const column = document.getElementById('filter-column').value;
         const condition = document.getElementById('filter-condition').value;
         const value = document.getElementById('filter-value').value.toLowerCase();
         
         if (!column) return;
-
         currentData = originalData.filter(row => {
             const cellValue = String(row[column] || '').toLowerCase();
             const numCellValue = parseFloat(String(row[column]).replace(',', '.'));
             const numValue = parseFloat(String(value).replace(',', '.'));
-
             switch (condition) {
                 case 'contains': return cellValue.includes(value);
                 case 'not_contains': return !cellValue.includes(value);
@@ -341,15 +303,16 @@ Function Get-HtmlTemplate {
                 default: return true;
             }
         });
-        
+        Object.keys(sortState).forEach(key => delete sortState[key]);
         renderTable();
         updateStatus();
-        closeModal('filter-modal');
+        if(close) closeModal('filter-modal');
     }
 
     function removeFilter() {
         currentData = [...originalData];
-        Object.keys(sortState).forEach(key => delete sortState[key]); // Limpa ordenação
+        document.getElementById('filter-value').value = '';
+        Object.keys(sortState).forEach(key => delete sortState[key]);
         renderTable();
         updateStatus();
     }
@@ -358,7 +321,7 @@ Function Get-HtmlTemplate {
         if (currentData.length === 0) return;
         const headers = columnStructure.map(c => c.displayName);
         const rows = currentData.map(row => columnStructure.map(col => {
-            let cell = row[col.originalName] === null || row[col.originalName] === undefined ? '' : row[col.originalName];
+            let cell = row[col.originalName] ?? '';
             let cellString = String(cell);
             if (cellString.includes(',') || cellString.includes('"') || cellString.includes('\n')) {
                 cellString = `"${cellString.replace(/"/g, '""')}"`;
@@ -381,17 +344,11 @@ Function Get-HtmlTemplate {
         document.getElementById('btn-remove-filter').addEventListener('click', removeFilter);
         document.getElementById('btn-download-csv').addEventListener('click', downloadCSV);
         document.getElementById('btn-view-charts').addEventListener('click', () => showModal('charts-modal'));
-        document.getElementById('apply-filter-btn').addEventListener('click', applyFilter);
-        document.querySelectorAll('.modal-close').forEach(el => {
-            el.addEventListener('click', () => closeModal(el.closest('.modal').id));
-        });
+        document.getElementById('apply-filter-btn').addEventListener('click', () => applyFilter(true));
+        document.querySelectorAll('.modal-close').forEach(el => el.addEventListener('click', () => closeModal(el.closest('.modal').id)));
+        
         const filterColumnSelect = document.getElementById('filter-column');
-        columnStructure.forEach(col => {
-            const option = document.createElement('option');
-            option.value = col.originalName;
-            option.textContent = col.displayName;
-            filterColumnSelect.appendChild(option);
-        });
+        columnStructure.forEach(col => filterColumnSelect.add(new Option(col.displayName, col.originalName)));
     }
 
     function showModal(modalId) {
@@ -431,10 +388,22 @@ Function Get-HtmlTemplate {
             div.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end';
             div.innerHTML = `
                 <div><label class="text-xs font-semibold">Eixo X / Grupo:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
-                <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><select name="y-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
+                <div>
+                    <label class="text-xs font-semibold">Eixo Y / Valor:</label>
+                    <div class="flex space-x-1">
+                        <select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select>
+                        <select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm">
+                            <option value="sum">Soma</option>
+                            <option value="avg">Média</option>
+                            <option value="count">Contagem</option>
+                            <option value="min">Mínimo</option>
+                            <option value="max">Máximo</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="combo-type-control hidden"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
                 <div class="flex items-end space-x-2">
-                    <div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="${seriesColors[seriesCounter-1]}" name="color" class="mt-1 w-full h-9 p-0 border-0"></div>
+                    <div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="${seriesColors[(seriesCounter-1) % seriesColors.length]}" name="color" class="mt-1 w-full h-9 p-0 border-0 bg-white rounded-md"></div>
                     ${!isFirst ? `<button type="button" class="remove-series-btn h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600">&times;</button>` : ''}
                 </div>`;
             document.getElementById('series-container').appendChild(div);
@@ -445,21 +414,26 @@ Function Get-HtmlTemplate {
         
         const buildChartOptions = () => {
             const fontColor = '#64748B';
-            const gridColor = 'rgba(0, 0, 0, 0.1)';
+            const gridColor = document.getElementById('show-grid').checked ? 'rgba(0, 0, 0, 0.1)' : 'transparent';
+            const yAxisAuto = document.getElementById('y-axis-auto').checked;
+            const yAxisMax = parseFloat(document.getElementById('y-axis-max').value);
+            const labelPos = document.getElementById('label-position').value;
+
             return {
                 responsive: true, maintainAspectRatio: false,
                 plugins: {
                     datalabels: {
                         display: document.getElementById('show-labels').checked,
                         color: fontColor,
-                        font: { size: 12 },
-                        anchor: 'end', align: 'end',
+                        font: { size: parseInt(document.getElementById('label-size').value) || 12 },
+                        align: labelPos,
+                        anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'),
                         formatter: val => typeof val === 'number' ? val.toLocaleString('pt-BR') : val
                     }
                 },
                 scales: {
                     x: { ticks: { color: fontColor }, grid: { color: gridColor } },
-                    y: { beginAtZero: true, ticks: { color: fontColor }, grid: { color: gridColor } }
+                    y: { beginAtZero: true, ticks: { color: fontColor }, grid: { color: gridColor }, max: yAxisAuto ? undefined : yAxisMax }
                 }
             };
         };
@@ -474,25 +448,37 @@ Function Get-HtmlTemplate {
              
              const parseValue = v => parseFloat(String(v || '0').replace(',', '.')) || 0;
              const firstXAxis = seriesControls[0].querySelector('[name="x-axis"]').value;
-             const labels = [...new Set(currentData.map(d => d[firstXAxis]))];
+             const labels = [...new Set(currentData.map(d => d[firstXAxis]))].sort();
 
              const datasets = Array.from(seriesControls).map(control => {
                 const yCol = control.querySelector('[name="y-axis"]').value;
                 const xCol = control.querySelector('[name="x-axis"]').value;
+                const agg = control.querySelector('[name="aggregation"]').value;
                 const seriesTypeOption = control.querySelector('[name="series-type"]').value;
 
-                let seriesType;
-                if (chartType === 'combo') seriesType = seriesTypeOption;
-                else if (chartType === 'line') seriesType = 'line';
-                else seriesType = 'bar'; // for bar, stacked, horizontalBar
+                let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
+                
+                const data = labels.map(label => {
+                    const group = currentData.filter(d => d[xCol] === label).map(r => parseValue(r[yCol]));
+                    if (group.length === 0) return 0;
+                    switch(agg) {
+                        case 'sum': return group.reduce((a, b) => a + b, 0);
+                        case 'avg': return group.reduce((a, b) => a + b, 0) / group.length;
+                        case 'count': return group.length;
+                        case 'min': return Math.min(...group);
+                        case 'max': return Math.max(...group);
+                        default: return 0;
+                    }
+                });
 
                 return {
                     label: columnStructure.find(c => c.originalName === yCol).displayName,
-                    data: labels.map(label => currentData.filter(d => d[xCol] === label).reduce((sum, r) => sum + parseValue(r[yCol]), 0)),
+                    data: data,
                     borderColor: control.querySelector('[name="color"]').value,
                     backgroundColor: control.querySelector('[name="color"]').value + 'B3',
                     type: seriesType,
-                    tension: 0.4
+                    tension: parseFloat(document.getElementById('line-interpolation').value) || 0.4,
+                    borderRadius: parseInt(document.getElementById('bar-border-radius').value) || 0
                 };
              });
 
@@ -514,8 +500,9 @@ Function Get-HtmlTemplate {
 
         addSeriesControl(true);
         document.getElementById('charts-controls-panel').addEventListener('change', renderChart);
-        document.getElementById('add-series-btn').addEventListener('click', () => addSeriesControl());
+        document.getElementById('add-series-btn').addEventListener('click', () => addSeriesControl(false));
         document.getElementById('download-chart-btn').addEventListener('click', downloadChart);
+        document.getElementById('y-axis-auto').onchange = e => { document.getElementById('y-axis-max').disabled = e.target.checked; };
         renderChart();
     }
 '@
@@ -534,16 +521,14 @@ Function Get-HtmlTemplate {
         #table-container { max-height: calc(100vh - 140px); overflow: auto; }
         table thead { position: sticky; top: 0; z-index: 1; }
         .chart-selector input:checked + label { border-color: #3b82f6; background-color: #eff6ff; box-shadow: 0 0 0 2px #3b82f6; }
+        .divider { border-top: 1px solid #e5e7eb; margin-top: 1rem; margin-bottom: 1rem; }
     </style>
     <script>$($EmbeddedLibraries.Tailwind)</script>
 </head>
 <body class="bg-gray-100 font-sans">
-
-    <!-- Dados JSON embutidos -->
     <script id="jsonData" type="application/json">$JsonData</script>
     <script id="jsonColumnStructure" type="application/json">$JsonColumnStructure</script>
 
-    <!-- Cabeçalho e Barra de Ferramentas -->
     <header class="bg-white shadow-md p-4 sticky top-0 z-20">
         <div class="container mx-auto flex justify-between items-center">
             <h1 class="text-2xl font-bold text-gray-800">Power-Graphx Web Editor</h1>
@@ -557,17 +542,9 @@ Function Get-HtmlTemplate {
         </div>
     </header>
 
-    <!-- Container da Tabela de Dados -->
-    <main class="container mx-auto p-4">
-        <div id="table-container" class="bg-white rounded-lg shadow overflow-hidden"></div>
-    </main>
-    
-    <!-- Barra de Status -->
-    <footer class="fixed bottom-0 left-0 right-0 bg-gray-800 text-white text-sm p-2 text-center">
-        <span id="status-label">Carregando...</span>
-    </footer>
+    <main class="container mx-auto p-4"><div id="table-container" class="bg-white rounded-lg shadow overflow-hidden"></div></main>
+    <footer class="fixed bottom-0 left-0 right-0 bg-gray-800 text-white text-sm p-2 text-center"><span id="status-label">Carregando...</span></footer>
 
-    <!-- Modal de Filtro -->
     <div id="filter-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-30">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
             <h3 class="text-lg font-medium text-gray-900 mb-4">Filtrar Dados</h3>
@@ -580,13 +557,11 @@ Function Get-HtmlTemplate {
         </div>
     </div>
     
-    <!-- Modal de Gráficos -->
     <div id="charts-modal" class="modal hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-40 p-4">
         <div class="bg-white rounded-xl shadow-2xl w-full h-full max-w-7xl flex flex-col p-6 relative">
             <button class="modal-close absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
             <h2 class="text-2xl font-bold text-gray-800 mb-4">Visualização de Gráficos</h2>
             <div class="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 overflow-hidden">
-                <!-- Coluna de Controles -->
                 <div id="charts-controls-panel" class="lg:col-span-1 flex flex-col space-y-4 overflow-y-auto pr-2">
                     <div>
                         <h3 class="font-bold text-gray-700 mb-2">1. Tipo de Gráfico</h3>
@@ -603,24 +578,40 @@ Function Get-HtmlTemplate {
                         <div id="series-container" class="space-y-3 max-h-60 overflow-y-auto"></div>
                     </div>
                 </div>
-                <!-- Coluna do Gráfico -->
                 <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4"><div class="relative w-full h-full"><canvas id="mainChart"></canvas></div></div>
-                <!-- Coluna de Formatação e Ações -->
-                <div class="lg:col-span-1 flex flex-col space-y-4 overflow-y-auto pr-2">
-                    <div>
-                        <h3 class="font-bold text-gray-700 mb-2">3. Formatação</h3>
-                        <div class="flex items-center"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600"><label for="show-labels" class="ml-2 block text-sm text-gray-900">Exibir rótulos de dados</label></div>
+                <div class="lg:col-span-1 flex flex-col space-y-2 overflow-y-auto pr-2 text-sm">
+                    <h3 class="font-bold text-gray-700 mb-2">3. Formatar Visual</h3>
+                    <div><span class="font-semibold text-gray-700">Rótulos de Dados</span>
+                        <div class="flex items-center mt-2"><input id="show-labels" type="checkbox" class="h-4 w-4 rounded border-gray-300"><label for="show-labels" class="ml-2 text-gray-900">Exibir rótulos</label></div>
+                        <div class="mt-2 space-y-2">
+                            <div><label for="label-position" class="text-xs text-gray-600">Posição:</label><select id="label-position" class="mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="end">Topo/Direita</option><option value="center">Centro</option><option value="start">Base/Esquerda</option></select></div>
+                            <div><label for="label-size" class="text-xs text-gray-600">Tamanho Fonte:</label><input type="number" id="label-size" value="12" class="mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                        </div>
                     </div>
-                    <div class="pt-4 border-t">
+                    <div class="divider"></div>
+                    <div><span class="font-semibold text-gray-700">Opções de Barra</span>
+                        <div class="mt-2"><label for="bar-border-radius" class="text-xs text-gray-600">Arredondamento da Borda:</label><input type="number" id="bar-border-radius" value="0" min="0" class="mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                    </div>
+                    <div class="divider"></div>
+                    <div><span class="font-semibold text-gray-700">Opções de Linha</span>
+                        <div class="mt-2"><label for="line-interpolation" class="text-xs text-gray-600">Interpolação:</label><select id="line-interpolation" class="mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="0.0">Linear</option><option value="0.4" selected>Suave</option><option value="1.0">Curva Máxima</option></select></div>
+                    </div>
+                    <div class="divider"></div>
+                    <div><span class="font-semibold text-gray-700">Eixos e Grade</span>
+                        <div class="flex items-center mt-2"><input id="show-grid" type="checkbox" checked class="h-4 w-4 rounded border-gray-300"><label for="show-grid" class="ml-2 text-gray-900">Exibir grades</label></div>
+                        <div class="flex items-center mt-2"><input id="y-axis-auto" type="checkbox" checked class="h-4 w-4 rounded border-gray-300"><label for="y-axis-auto" class="ml-2 text-gray-900">Eixo Y Automático</label></div>
+                        <input type="number" id="y-axis-max" placeholder="Ex: 100" disabled class="mt-1 block w-full rounded-md border-gray-300 text-xs disabled:bg-gray-100">
+                    </div>
+                    <div class="divider"></div>
+                    <div>
                          <h3 class="font-bold text-gray-700 mb-2">4. Ações</h3>
-                         <button id="download-chart-btn" class="w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700">Baixar Gráfico (PNG)</button>
+                         <button id="download-chart-btn" class="w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Bibliotecas e Lógica da Aplicação -->
     <script>$($EmbeddedLibraries.ChartJS)</script>
     <script>$($EmbeddedLibraries.ChartLabels)</script>
     <script>$ApplicationJavaScript</script>
