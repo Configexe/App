@@ -1,13 +1,15 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 4.5.1 - Correção de Sintaxe do PowerShell
+# Versão: 4.6.0 - Eixos Flexíveis e Agregação Opcional
 # Autor: jefferson/configexe (com modernização por IA)
 #
-# Melhorias da Versão 4.5.1:
-# - CORREÇÃO DE BUG: Corrigido um erro de sintaxe no PowerShell (`[Parameter((...)]`)
-#   que impedia a execução do script.
-# - Otimizações de código que resultaram em um arquivo ligeiramente menor,
-#   sem perda de nenhuma funcionalidade.
+# Melhorias da Versão 4.6.0:
+# - NOVO RECURSO: O seletor do Eixo Y agora lista todas as colunas (texto e
+#   números), permitindo o uso de dados categóricos para contagens ou para
+#   plotar dados pré-agregados.
+# - NOVO RECURSO: Adicionada a opção 'Nenhum' ao seletor de agregação de dados
+#   (Soma, Média, etc.). Quando selecionada, o gráfico plota o valor direto da
+#   fonte de dados, sem aplicar cálculos.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -46,7 +48,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v4.5.1 com Unpivot por Gráfico)
+    // Power-Graphx Web App - Lógica Principal (v4.6.0 com Eixos Flexíveis)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -413,21 +415,23 @@ Function Get-HtmlTemplate {
         document.body.removeChild(link);
     }
     
-    // NOVO: Helper para atualizar seletores de eixos do gráfico
     function updateChartAxisSelectors(chartId, data) {
         const section = document.getElementById(`chart-section-${chartId}`);
         if (!section || !data || data.length === 0) return;
         const cols = Object.keys(data[0]).map(name => ({ originalName: name, displayName: name }));
-        const numericCols = cols.filter(c => data.some(row => row[c.originalName] && !isNaN(parseFloat(String(row[c.originalName]).replace(',', '.')))));
+        
         section.querySelectorAll('.series-control').forEach(series => {
             const xAxisSelect = series.querySelector('select[name="x-axis"]'), yAxisSelect = series.querySelector('select[name="y-axis"]');
             const currentX = xAxisSelect.value, currentY = yAxisSelect.value;
+            
+            // Popula X e Y com TODAS as colunas
             xAxisSelect.innerHTML = '';
             cols.forEach(c => xAxisSelect.add(new Option(c.displayName, c.originalName)));
             if (cols.find(c => c.originalName === currentX)) xAxisSelect.value = currentX;
+            
             yAxisSelect.innerHTML = '';
-            numericCols.forEach(c => yAxisSelect.add(new Option(c.displayName, c.originalName)));
-            if (numericCols.find(c => c.originalName === currentY)) yAxisSelect.value = currentY;
+            cols.forEach(c => yAxisSelect.add(new Option(c.displayName, c.originalName)));
+            if (cols.find(c => c.originalName === currentY)) yAxisSelect.value = currentY;
         });
     }
 
@@ -467,7 +471,7 @@ Function Get-HtmlTemplate {
         newSeries.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end series-control';
         newSeries.innerHTML = `
             <div><label class="text-xs font-semibold">Eixo X / Grupo:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
-            <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option></select></div></div>
+            <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="none" selected>Nenhum</option><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option></select></div></div>
             <div class="sm:col-span-2"><label class="text-xs font-semibold">Nome da Série (Legenda):</label><input type="text" name="series-label" class="mt-1 block w-full rounded-md border-gray-300 text-sm" placeholder="Opcional. Ex: Total de Vendas"></div>
             <div class="combo-type-control" style="display: none;"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
             <div class="flex items-end space-x-2"><div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="#${Math.floor(Math.random()*16777215).toString(16)}" name="color" class="mt-1 w-full h-9 p-0 border-0 bg-white rounded-md"></div>
@@ -513,16 +517,29 @@ Function Get-HtmlTemplate {
             const yCol = control.querySelector('[name="y-axis"]').value, xCol = control.querySelector('[name="x-axis"]').value, agg = control.querySelector('[name="aggregation"]').value;
             const customLabel = control.querySelector('input[name="series-label"]').value, seriesTypeOption = control.querySelector('[name="series-type"]').value;
             let seriesType = chartType === 'combo' ? seriesTypeOption : (chartType === 'line' ? 'line' : 'bar');
+            
             const data = labels.map(label => {
-                const group = chartData.filter(d => d[xCol] == label).map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0);
-                if (group.length === 0) return 0;
+                const groupData = chartData.filter(d => d[xCol] == label);
+                if (groupData.length === 0) return 0;
+                
                 switch(agg) {
-                    case 'sum': return group.reduce((a, b) => a + b, 0);
-                    case 'avg': return group.reduce((a, b) => a + b, 0) / group.length;
-                    case 'count': return group.length;
-                    case 'min': return Math.min(...group);
-                    case 'max': return Math.max(...group);
-                    default: return 0;
+                    case 'count':
+                        return groupData.length;
+                    case 'none': {
+                        const firstValue = groupData[0][yCol];
+                        return parseFloat(String(firstValue || '0').replace(',', '.')) || 0;
+                    }
+                    default: { // sum, avg, min, max
+                        const numericValues = groupData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0);
+                        if (numericValues.length === 0) return 0;
+                        switch(agg) {
+                            case 'sum': return numericValues.reduce((a, b) => a + b, 0);
+                            case 'avg': return numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+                            case 'min': return Math.min(...numericValues);
+                            case 'max': return Math.max(...numericValues);
+                            default: return 0;
+                        }
+                    }
                 }
             });
             return {
@@ -611,7 +628,7 @@ Function Get-HtmlTemplate {
                  <div class="md:col-span-3">
                      <h2 class="text-2xl font-bold text-gray-800 mb-2">Console SQL (AlaSQL)</h2>
                      <div class="flex items-center space-x-2 mb-4">
-                        <p class="text-sm text-gray-600">Exemplo: <code>SELECT * FROM source_data LIMIT 10;</code></p>
+                        <p class="text-sm text-gray-600">Exemplo: code>SELECT * FROM source_data LIMIT 10;</code></p>
                      </div>
                      <textarea id="sql-editor" class="w-full h-32 p-2 font-mono text-sm border border-gray-300 rounded-md" placeholder="SELECT * FROM source_data;">SELECT * FROM source_data;</textarea>
                  </div>
