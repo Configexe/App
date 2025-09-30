@@ -1,15 +1,13 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 6.1.0 - Reintrodução dos Ajustes Finos de Gráfico
-# Autor: jefferson/configexe (com modernização por IA)
+# Versão: 6.1.1 - Correção da Interface para Gráficos Combo
+# Autor: jefferson/configexe
 #
-# Melhorias da Versão 6.1.0:
-# - NOVO RECURSO: Reintroduzidas as opções de formatação visual para os gráficos:
-#   - Ativar/Desativar a exibição da grade (linhas de fundo).
-#   - Mudar a posição dos rótulos de dados (topo, centro, base).
-#   - Controlar a suavização (interpolação) das linhas.
-#   - Ajustar o arredondamento das bordas das barras.
-#   - Definir o tamanho da fonte para os rótulos de dados.
+# Melhorias da Versão 6.1.1:
+# - CORREÇÃO DE BUG: Resolvido o problema em que as opções de tipo de série
+#   (Barra/Linha) e Eixo Secundário não apareciam ao selecionar o gráfico
+#   do tipo "Combo". A interface agora exibe esses controles dinamicamente
+#   apenas quando são relevantes.
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -46,7 +44,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v6.1.0)
+    // Power-Graphx Web App - Lógica Principal (v6.1.1)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -252,7 +250,7 @@ Function Get-HtmlTemplate {
         
         if(rowIndex >= 0 && colName && currentData[rowIndex]) {
             currentData[rowIndex][colName] = td.textContent;
-            alasql.tables[initialTableName].data = currentData; // Persiste a mudança no AlaSQL
+            alasql.tables[initialTableName].data = currentData;
             document.querySelectorAll('.chart-analysis-section').forEach(section => renderChart(section.dataset.id));
         }
     }
@@ -386,7 +384,6 @@ Function Get-HtmlTemplate {
                 }
                 if(match) {
                     cell.style.backgroundColor = rule.color;
-                    // Basic contrast check
                     const hex = rule.color.replace('#', '');
                     const r = parseInt(hex.substring(0, 2), 16);
                     const g = parseInt(hex.substring(2, 4), 16);
@@ -422,6 +419,17 @@ Function Get-HtmlTemplate {
         const section = document.getElementById(`chart-section-${id}`);
         if (!section) return;
 
+        section.querySelectorAll(`input[name="chart-type-${id}"]`).forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const isCombo = e.target.value === 'combo';
+                section.querySelectorAll('.series-control').forEach(control => {
+                    control.querySelector('.combo-type-control').style.display = isCombo ? 'block' : 'none';
+                    control.querySelector('.secondary-axis-control').style.display = isCombo ? 'block' : 'none';
+                });
+                renderChart(id); 
+            });
+        });
+
         section.addEventListener('change', () => renderChart(id));
         section.addEventListener('input', () => renderChart(id));
         section.querySelector('.add-series-btn').addEventListener('click', () => addSeriesControl(id));
@@ -453,9 +461,18 @@ Function Get-HtmlTemplate {
             <div class="secondary-axis-control" style="display: none;"><label class="flex items-center text-xs font-semibold"><input type="checkbox" name="secondary-axis" class="h-4 w-4 mr-2 rounded border-gray-300">Usar Eixo Secundário</label></div>
             <div class="flex items-end space-x-2"><div class="w-full"><label class="text-xs font-semibold">Cor:</label><input type="color" value="#${(0x1000000+Math.random()*0xffffff).toString(16).substr(1,6)}" name="color" class="mt-1 w-full h-9 p-0 border-0 bg-white rounded-md"></div>
                 ${!isFirst ? `<button type="button" class="remove-series-btn h-9 px-3 bg-red-500 text-white rounded-md hover:bg-red-600">&times;</button>` : ''}</div>`;
+        
         if (!isFirst) {
             newSeries.querySelector('.remove-series-btn').onclick = () => { newSeries.remove(); renderChart(chartId); };
         }
+
+        const section = document.getElementById(`chart-section-${chartId}`);
+        const chartType = section.querySelector(`input[name="chart-type-${chartId}"]:checked`).value;
+        if (chartType === 'combo') {
+            newSeries.querySelector('.combo-type-control').style.display = 'block';
+            newSeries.querySelector('.secondary-axis-control').style.display = 'block';
+        }
+
         seriesContainer.appendChild(newSeries);
         const dataSourceSelect = document.getElementById(`chart-data-source-${chartId}`);
         if(dataSourceSelect.value) {
@@ -498,10 +515,7 @@ Function Get-HtmlTemplate {
         const canvas = section.querySelector('canvas');
         
         if (!chartData || chartData.length === 0) {
-            if (canvas) {
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-            }
+            if (canvas) { canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); }
             return;
         }
         
@@ -550,7 +564,6 @@ Function Get-HtmlTemplate {
         
         const options = buildChartOptions(section, datasets);
         let finalChartType = 'bar';
-
         if(chartType === 'combo') {
             finalChartType = 'bar';
         } else if (chartType === 'area') {
@@ -562,7 +575,7 @@ Function Get-HtmlTemplate {
             options.scales.y.stacked = true;
         } else if (chartType === 'pie') {
             const pieData = { labels, datasets: [{ data: datasets[0].data, backgroundColor: colorPalette }] };
-            chartInstances[id] = new Chart(canvas, { type: 'pie', data: pieData, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: !!options.plugins.title.text, text: options.plugins.title.text }, datalabels: { display: true, color: '#fff', formatter: (value, ctx) => { let sum = ctx.chart.data.datasets[0].data.reduce((a, b) => a + b, 0); let percentage = (value*100 / sum).toFixed(2)+"%"; return percentage; } } } } });
+            chartInstances[id] = new Chart(canvas, { type: 'pie', data: pieData, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: !!options.plugins.title.text, text: options.plugins.title.text }, datalabels: { display: true, color: '#fff', formatter: (value, ctx) => { let sum = ctx.chart.data.datasets[0].data.reduce((a, b) => a + b, 0); let percentage = sum > 0 ? (value*100 / sum).toFixed(2)+"%" : "0.00%"; return percentage; } } } } });
             return;
         } else {
             finalChartType = chartType;
@@ -634,19 +647,20 @@ Function Get-HtmlTemplate {
         formula = formula.replace(/\[([^\]]+)\]/g, '`$1`');
 
         try {
-            alasql(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${newColumnName}\` STRING`);
-            const newData = alasql(`SELECT *, ${formula} AS \`${newColumnName}_temp\` FROM \`${tableName}\``);
-            newData.forEach(row => {
-                alasql(`UPDATE \`${tableName}\` SET \`${newColumnName}\` = '${row[newColumnName+"_temp"]}' WHERE ?`, [row]);
-            });
+            const tableData = alasql.tables[tableName].data;
+            const query = `SELECT *, ${formula} AS \`${newColumnName}\` FROM ?`;
+            const newData = alasql(query, [tableData]);
+            alasql.tables[tableName].data = newData;
+
             alert(`Coluna "${newColumnName}" adicionada à tabela "${tableName}" com sucesso.`);
             document.getElementById('calc-column-modal').classList.add('hidden');
             
-            const updatedData = alasql(`SELECT * FROM \`${tableName}\``);
-            currentData = updatedData;
-            let newColumns = updatedData.length > 0 ? Object.keys(updatedData[0]).map(name => ({ originalName: name, displayName: name })) : [];
-            updateColumnStructure(newColumns);
-            renderTable();
+            if (currentData === tableData) {
+                currentData = newData;
+                let newColumns = newData.length > 0 ? Object.keys(newData[0]).map(name => ({ originalName: name, displayName: name })) : [];
+                updateColumnStructure(newColumns);
+                renderTable();
+            }
             updateTableListUI();
         } catch(e) {
             alert(`Erro ao aplicar a fórmula: ${e.message}`);
@@ -677,7 +691,7 @@ Function Get-HtmlTemplate {
                 case 'contains': query += `LIKE '%${value}%'`; break;
                 case 'not_contains': query += `NOT LIKE '%${value}%'`; break;
                 default:
-                    if (isNaN(value)) {
+                    if (isNaN(value) || value.trim() === '') {
                         query += `${condition.replace('_', ' ')} '${value}'`;
                     } else {
                         query += `${condition.replace('_', ' ')} ${value}`;
