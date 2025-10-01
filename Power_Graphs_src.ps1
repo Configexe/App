@@ -1,17 +1,9 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 6.3.0 - Automação: Atualização da Fonte de Dados
+# Versão: 6.4.0 - Automação: Atualização da Fonte de Dados e Correções
 # Autor: jefferson/configexe
 #
-# Melhorias da Versão 6.3.0:
-# - NOVO RECURSO: Adicionado o botão "Atualizar Dados", que permite ao
-#   usuário substituir a fonte de dados principal (`source_data`) por um
-#   novo arquivo CSV.
-# - LÓGICA DE AUTOMAÇÃO: Ao atualizar os dados, a aplicação valida se as
-#   colunas do novo arquivo são idênticas às do original. Se forem,
-#   todos os gráficos, tabelas e visualizações são automaticamente
-#   recalculados com os novos dados, transformando a sessão salva em um
-#   template de relatório reutilizável.
+
 # -----------------------------------------------------------------------------
 
 # --- 1. Carregar Assemblies Necessárias ---
@@ -47,7 +39,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v6.3.0)
+    // Power-Graphx Web App - Lógica Principal (v6.4.0)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -167,8 +159,7 @@ Function Get-HtmlTemplate {
             } else {
                 updateTableListUI();
                 statusEl.textContent = `Comando executado. A lista de tabelas foi atualizada.`;
-                currentData = [];
-                updateColumnStructure([]);
+                // Não limpa a visualização principal se o comando não for um select
             }
             
             Object.keys(sortState).forEach(key => delete sortState[key]);
@@ -499,6 +490,23 @@ Function Get-HtmlTemplate {
             renderChart(id);
         });
 
+        // Lógica para controlar a UI do Group By
+        const groupBySelect = section.querySelector('.group-by-select');
+        groupBySelect.addEventListener('change', (e) => {
+            const hasGroupBy = !!e.target.value;
+            const seriesContainer = section.querySelector(`#series-container-${id}`);
+            const allSeries = seriesContainer.querySelectorAll('.series-control');
+            
+            section.querySelector('.add-series-btn').style.display = hasGroupBy ? 'none' : 'inline-block';
+
+            if (hasGroupBy && allSeries.length > 1) {
+                // Remove todas as séries, exceto a primeira
+                for (let i = allSeries.length - 1; i > 0; i--) {
+                    allSeries[i].remove();
+                }
+            }
+        });
+
         addSeriesControl(id, true);
         updateTableListUI(); // Garante que a lista de tabelas no novo gráfico esteja atualizada
         const selectedTable = dataSourceSelect.value;
@@ -514,7 +522,7 @@ Function Get-HtmlTemplate {
         newSeries.className = 'p-3 border rounded-lg bg-gray-50 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end series-control';
         newSeries.innerHTML = `
             <div><label class="text-xs font-semibold">Eixo X / Categoria:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
-            <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option><option value="none">Nenhum</option></select></div></div>
+            <div><label class="text-xs font-semibold">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option><option value="percentage_total">% do Total</option><option value="none">Nenhum</option></select></div></div>
             <div class="sm:col-span-2"><label class="text-xs font-semibold">Nome da Série (Legenda):</label><input type="text" name="series-label" class="mt-1 block w-full rounded-md border-gray-300 text-sm" placeholder="Opcional"></div>
             <div class="combo-type-control" style="display: none;"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
             <div class="secondary-axis-control" style="display: none;"><label class="flex items-center text-xs font-semibold"><input type="checkbox" name="secondary-axis" class="h-4 w-4 mr-2 rounded border-gray-300">Usar Eixo Secundário</label></div>
@@ -591,16 +599,21 @@ Function Get-HtmlTemplate {
 
         if (groupingColumn) {
              const uniqueGroups = [...new Set(chartData.map(d => d[groupingColumn]))].sort();
-             const control = seriesControls[0];
+             const control = seriesControls[0]; // Em modo group-by, usa apenas a primeira série
+             const yCol = control.querySelector('[name="y-axis"]').value, xCol = control.querySelector('[name="x-axis"]').value, agg = control.querySelector('[name="aggregation"]').value;
+             const seriesTypeOption = control.querySelector('[name="series-type"]').value;
+             const useSecondaryAxis = control.querySelector('[name="secondary-axis"]').checked;
+
+             let totalForPercent = 1;
+             if (agg === 'percentage_total') {
+                 totalForPercent = chartData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0).reduce((a, b) => a + b, 0);
+             }
+
              uniqueGroups.forEach((groupValue, index) => {
                  const groupFilteredData = chartData.filter(d => d[groupingColumn] == groupValue);
-                 const yCol = control.querySelector('[name="y-axis"]').value, xCol = control.querySelector('[name="x-axis"]').value, agg = control.querySelector('[name="aggregation"]').value;
-                 const seriesTypeOption = control.querySelector('[name="series-type"]').value;
-                 const useSecondaryAxis = control.querySelector('[name="secondary-axis"]').checked;
-
                  const data = labels.map(label => {
                      const groupDataForLabel = groupFilteredData.filter(d => d[xCol] == label);
-                     return calculateAggregation(groupDataForLabel, yCol, agg);
+                     return calculateAggregation(groupDataForLabel, yCol, agg, totalForPercent);
                  });
                  const color = colorPalette[index % colorPalette.length];
                  datasets.push({ label: groupValue, data, borderColor: color, backgroundColor: color + 'B3', type: seriesTypeOption, yAxisID: useSecondaryAxis ? 'y1' : 'y' });
@@ -611,20 +624,31 @@ Function Get-HtmlTemplate {
                  const customLabel = control.querySelector('input[name="series-label"]').value;
                  const seriesTypeOption = control.querySelector('[name="series-type"]').value;
                  const useSecondaryAxis = control.querySelector('[name="secondary-axis"]').checked;
+
+                 let totalForPercent = 1;
+                 if (agg === 'percentage_total') {
+                     totalForPercent = chartData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0).reduce((a, b) => a + b, 0);
+                 }
                  
                  const data = labels.map(label => {
                      const groupData = chartData.filter(d => d[xCol] == label);
-                     return calculateAggregation(groupData, yCol, agg);
+                     return calculateAggregation(groupData, yCol, agg, totalForPercent);
                  });
+
+                 let seriesLabel = customLabel.trim() || `${yCol}`;
+                 if (agg !== 'none') {
+                    const aggText = control.querySelector('[name="aggregation"] option:checked').textContent;
+                    seriesLabel += ` (${aggText})`;
+                 }
                  
-                 return { label: customLabel.trim() || `${yCol} (${agg})`, data, borderColor: control.querySelector('[name="color"]').value, backgroundColor: control.querySelector('[name="color"]').value + 'B3', type: seriesTypeOption, yAxisID: useSecondaryAxis ? 'y1' : 'y' };
+                 return { label: seriesLabel, data, borderColor: control.querySelector('[name="color"]').value, backgroundColor: control.querySelector('[name="color"]').value + 'B3', type: seriesTypeOption, yAxisID: useSecondaryAxis ? 'y1' : 'y' };
              });
         }
         
         const options = buildChartOptions(section, datasets);
         let finalChartType = 'bar';
         if(chartType === 'combo') {
-            finalChartType = 'bar';
+            finalChartType = 'bar'; // O tipo base é barra, cada série define o seu
         } else if (chartType === 'area') {
             finalChartType = 'line';
             datasets.forEach(ds => ds.fill = true);
@@ -632,10 +656,9 @@ Function Get-HtmlTemplate {
             finalChartType = 'bar';
             options.scales.x.stacked = true;
             options.scales.y.stacked = true;
-        } else if (chartType === 'pie') {
-            const pieData = { labels, datasets: [{ data: datasets[0].data, backgroundColor: colorPalette }] };
-            chartInstances[id] = new Chart(canvas, { type: 'pie', data: pieData, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: !!options.plugins.title.text, text: options.plugins.title.text }, datalabels: { display: true, color: '#fff', formatter: (value, ctx) => { let sum = ctx.chart.data.datasets[0].data.reduce((a, b) => a + b, 0); let percentage = sum > 0 ? (value*100 / sum).toFixed(2)+"%" : "0.00%"; return percentage; } } } } });
-            return;
+        } else if (chartType === 'horizontalBar') {
+            finalChartType = 'bar';
+            options.indexAxis = 'y';
         } else {
             finalChartType = chartType;
         }
@@ -649,21 +672,21 @@ Function Get-HtmlTemplate {
         chartInstances[id] = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options });
     }
 
-    function calculateAggregation(data, column, aggType) {
+    function calculateAggregation(data, column, aggType, totalForPercent = 1) {
         if (data.length === 0) return 0;
+        const numericValues = data.map(r => parseFloat(String(r[column] || '0').replace(',', '.')) || 0);
+
         switch(aggType) {
             case 'count': return data.length;
-            case 'none': return parseFloat(String(data[0][column] || '0').replace(',', '.')) || 0;
-            default:
-                const numericValues = data.map(r => parseFloat(String(r[column] || '0').replace(',', '.')) || 0);
-                if (numericValues.length === 0) return 0;
-                switch(aggType) {
-                    case 'sum': return numericValues.reduce((a, b) => a + b, 0);
-                    case 'avg': return numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
-                    case 'min': return Math.min(...numericValues);
-                    case 'max': return Math.max(...numericValues);
-                    default: return 0;
-                }
+            case 'none': return numericValues.length > 0 ? numericValues[0] : 0;
+            case 'sum': return numericValues.reduce((a, b) => a + b, 0);
+            case 'avg': return numericValues.length > 0 ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length : 0;
+            case 'min': return numericValues.length > 0 ? Math.min(...numericValues) : 0;
+            case 'max': return numericValues.length > 0 ? Math.max(...numericValues) : 0;
+            case 'percentage_total':
+                const sum = numericValues.reduce((a, b) => a + b, 0);
+                return totalForPercent > 0 ? (sum / totalForPercent) * 100 : 0;
+            default: return 0;
         }
     }
 
@@ -679,11 +702,33 @@ Function Get-HtmlTemplate {
             plugins: {
                 title: { display: !!chartTitle, text: chartTitle, font: { size: 18 } },
                 subtitle: { display: !!chartSubtitle, text: chartSubtitle, padding: { bottom: 10 } },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) { label += ': '; }
+                            const isPercent = label.includes('% do Total');
+                            let value = context.parsed.y;
+                            if (context.chart.options.indexAxis === 'y') {
+                                value = context.parsed.x;
+                            }
+                            if (value !== null) {
+                                label += value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+                                if (isPercent) label += '%';
+                            }
+                            return label;
+                        }
+                    }
+                },
                 datalabels: {
                     display: section.querySelector('.show-labels').checked, color: fontColor,
                     font: { size: parseInt(section.querySelector('.label-size').value) || 12 },
                     align: labelPos, anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'),
-                    formatter: val => typeof val === 'number' ? val.toLocaleString('pt-BR') : val
+                    formatter: (value, ctx) => {
+                        const isPercent = ctx.dataset.label.includes('% do Total');
+                        let formattedVal = typeof value === 'number' ? value.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) : value;
+                        return isPercent ? formattedVal + '%' : formattedVal;
+                    }
                 }
             },
             scales: {
@@ -714,13 +759,9 @@ Function Get-HtmlTemplate {
             alert(`Coluna "${newColumnName}" adicionada à tabela "${tableName}" com sucesso.`);
             document.getElementById('calc-column-modal').classList.add('hidden');
             
-            if (currentData === tableData) {
-                currentData = newData;
-                let newColumns = newData.length > 0 ? Object.keys(newData[0]).map(name => ({ originalName: name, displayName: name })) : [];
-                updateColumnStructure(newColumns);
-                renderTable();
-            }
-            document.querySelectorAll('.chart-analysis-section').forEach(section => renderChart(section.dataset.id));
+            // Se a tabela modificada for a que está em exibição, atualize a UI
+            runQueryAndUpdateUI();
+
         } catch(e) {
             alert(`Erro ao aplicar a fórmula: ${e.message}`);
             console.error(e);
@@ -751,15 +792,15 @@ Function Get-HtmlTemplate {
                  case 'not_contains': filterClause += `NOT LIKE '%${value}%'`; break;
                  default:
                      if (isNaN(value) || value.trim() === '') {
-                         filterClause += `${condition.replace('_', ' ')} '${value}'`;
+                         filterClause += `${condition.replace('equals', '=').replace('not_equals', '!=')} '${value}'`;
                      } else {
-                         filterClause += `${condition.replace('_', ' ')} ${value}`;
+                         filterClause += `${condition.replace('equals', '=').replace('not_equals', '!=')} ${value}`;
                      }
              }
-            // Tenta aplicar o filtro a uma subconsulta da query atual
+             // Tenta aplicar o filtro a uma subconsulta da query atual
              try {
-                const filteredQuery = `SELECT * FROM (${query}) AS subquery${filterClause}`;
-                currentData = alasql(filteredQuery);
+                 const filteredQuery = `SELECT * FROM (${query}) AS subquery${filterClause}`;
+                 currentData = alasql(filteredQuery);
              } catch(e) {
                  console.error("Não foi possível aplicar filtro na query atual, aplicando na fonte original.", e);
                  currentData = alasql(`SELECT * FROM ${initialTableName}${filterClause}`);
@@ -793,7 +834,7 @@ Function Get-HtmlTemplate {
     
     function saveState() {
         const state = {
-            version: '6.3.0',
+            version: '6.4.0',
             alasqlTables: {},
             conditionalFormatting: conditionalFormattingRules,
             sqlEditorContent: document.getElementById('sql-editor').value,
@@ -926,8 +967,9 @@ Function Get-HtmlTemplate {
             newSeriesControl.querySelector('[name="secondary-axis"]').checked = s.secondaryAxis;
         });
         
-        // Dispara eventos para garantir que a UI dos gráficos se ajuste (ex: controles de combo)
+        // Dispara eventos para garantir que a UI dos gráficos se ajuste (ex: controles de combo, group by)
         section.querySelector(`input[name="chart-type-${id}"]:checked`).dispatchEvent(new Event('change', { bubbles: true }));
+        section.querySelector('select[name="group-by"]').dispatchEvent(new Event('change', { bubbles: true }));
     }
 '@
 
@@ -978,6 +1020,7 @@ Function Get-HtmlTemplate {
             <div class="md:col-span-3">
                 <h2 class="text-2xl font-bold text-gray-800 mb-2">Console SQL (AlaSQL)</h2>
                 <textarea id="sql-editor" class="w-full h-32 p-2 font-mono text-sm border border-gray-300 rounded-md" placeholder="SELECT * FROM source_data;">SELECT * FROM source_data;</textarea>
+                <p class="text-xs text-gray-500 mt-1">Dica: Para nomes de colunas, use crases (ex: `Nome da Coluna`).</p>
             </div>
             <div class="md:col-span-1">
                 <h3 class="text-lg font-bold text-gray-700 mb-2">Tabelas Carregadas</h3>
@@ -1001,24 +1044,24 @@ Function Get-HtmlTemplate {
     <template id="chart-analysis-template">
         <section id="chart-section-__ID__" class="chart-analysis-section bg-white rounded-lg shadow" data-id="__ID__">
              <div class="p-6">
-                 <div class="flex justify-between items-center mb-4">
-                     <h2 class="text-2xl font-bold text-gray-800">Análise Gráfica __ID__</h2>
-                     <button class="remove-chart-btn text-red-500 hover:text-red-700 font-bold text-xl">&times;</button>
-                 </div>
-                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                       <div class="lg:col-span-1 flex flex-col space-y-4">
-                           <div>
-                               <h3 class="font-bold text-gray-700 mb-2">1. Fonte e Tipo</h3>
-                               <select id="chart-data-source-__ID__" class="chart-data-source block w-full rounded-md border-gray-300 text-sm mb-2"></select>
-                               <div class="chart-selector grid grid-cols-3 gap-2">
+                  <div class="flex justify-between items-center mb-4">
+                      <h2 class="text-2xl font-bold text-gray-800">Análise Gráfica __ID__</h2>
+                      <button class="remove-chart-btn text-red-500 hover:text-red-700 font-bold text-xl">&times;</button>
+                  </div>
+                  <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                        <div class="lg:col-span-1 flex flex-col space-y-4">
+                            <div>
+                                <h3 class="font-bold text-gray-700 mb-2">1. Fonte e Tipo</h3>
+                                <select id="chart-data-source-__ID__" class="chart-data-source block w-full rounded-md border-gray-300 text-sm mb-2"></select>
+                                <div class="chart-selector grid grid-cols-3 gap-2">
                                      <div><input type="radio" name="chart-type-__ID__" value="bar" id="type-bar-__ID__" checked class="hidden"><label for="type-bar-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Barra</label></div>
+                                     <div><input type="radio" name="chart-type-__ID__" value="horizontalBar" id="type-hbar-__ID__" class="hidden"><label for="type-hbar-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Barra Horiz.</label></div>
                                      <div><input type="radio" name="chart-type-__ID__" value="line" id="type-line-__ID__" class="hidden"><label for="type-line-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Linha</label></div>
                                      <div><input type="radio" name="chart-type-__ID__" value="area" id="type-area-__ID__" class="hidden"><label for="type-area-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Área</label></div>
                                      <div><input type="radio" name="chart-type-__ID__" value="combo" id="type-combo-__ID__" class="hidden"><label for="type-combo-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Combo</label></div>
                                      <div><input type="radio" name="chart-type-__ID__" value="stackedBar" id="type-stackedBar-__ID__" class="hidden"><label for="type-stackedBar-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Empilhada</label></div>
-                                     <div><input type="radio" name="chart-type-__ID__" value="pie" id="type-pie-__ID__" class="hidden"><label for="type-pie-__ID__" class="p-2 border rounded-md cursor-pointer flex justify-center items-center text-xs">Pizza</label></div>
-                               </div>
-                           </div>
+                                </div>
+                            </div>
                             <div>
                                 <h3 class="font-bold text-gray-700 mb-2">2. Agrupar Por (Opcional)</h3>
                                 <select name="group-by" class="group-by-select mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="">-- Nenhum --</option></select>
@@ -1027,19 +1070,19 @@ Function Get-HtmlTemplate {
                                 <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">3. Séries de Dados</h3><button class="add-series-btn text-xs bg-blue-500 text-white py-1 px-2 rounded-full hover:bg-blue-600">+ Série</button></div>
                                 <div id="series-container-__ID__" class="space-y-3 max-h-60 overflow-y-auto"></div>
                            </div>
-                       </div>
-                       <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4 flex items-center justify-center min-h-[400px]">
+                        </div>
+                        <div class="lg:col-span-2 bg-gray-50 rounded-lg p-4 flex items-center justify-center min-h-[400px]">
                          <div class="relative w-full h-full"><canvas id="mainChart-__ID__"></canvas></div>
-                       </div>
-                       <div class="lg:col-span-1 flex flex-col space-y-2 text-sm">
-                           <h3 class="font-bold text-gray-700 mb-2">4. Formatar Visual</h3>
+                        </div>
+                        <div class="lg:col-span-1 flex flex-col space-y-2 text-sm">
+                            <h3 class="font-bold text-gray-700 mb-2">4. Formatar Visual</h3>
                             <div><span class="font-semibold text-gray-700">Títulos</span>
                                 <div class="mt-2 space-y-2">
                                     <div><label class="text-xs text-gray-600">Título:</label><input type="text" placeholder="Título do Gráfico" class="chart-title-input mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
                                     <div><label class="text-xs text-gray-600">Subtítulo:</label><input type="text" placeholder="Subtítulo do Gráfico" class="chart-subtitle-input mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
                                 </div>
                             </div>
-                           <div class="divider"></div>
+                            <div class="divider"></div>
                             <div><span class="font-semibold text-gray-700">Rótulos de Dados</span>
                                 <div class="flex items-center mt-2"><input id="show-labels-__ID__" type="checkbox" class="show-labels h-4 w-4 rounded border-gray-300"><label for="show-labels-__ID__" class="ml-2 text-gray-900">Exibir rótulos</label></div>
                                 <div class="mt-2 space-y-2">
@@ -1047,24 +1090,24 @@ Function Get-HtmlTemplate {
                                     <div><label class="text-xs text-gray-600">Tamanho Fonte:</label><input type="number" value="12" class="label-size mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
                                 </div>
                             </div>
-                           <div class="divider"></div>
+                            <div class="divider"></div>
                             <div><span class="font-semibold text-gray-700">Opções de Barra/Linha</span>
                                 <div class="mt-2"><label class="text-xs text-gray-600">Arredondamento da Borda:</label><input type="number" value="0" min="0" class="bar-border-radius mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
                                 <div class="mt-2"><label class="text-xs text-gray-600">Interpolação da Linha:</label><select class="line-interpolation mt-1 block w-full rounded-md border-gray-300 text-xs"><option value="0.0">Linear</option><option value="0.4" selected>Suave</option><option value="1.0">Curva Máxima</option></select></div>
                             </div>
-                           <div class="divider"></div>
+                            <div class="divider"></div>
                             <div><span class="font-semibold text-gray-700">Eixos e Grade</span>
                                 <div class="flex items-center mt-2"><input id="show-grid-__ID__" type="checkbox" checked class="show-grid h-4 w-4 rounded border-gray-300"><label for="show-grid-__ID__" class="ml-2 text-gray-900">Exibir grades</label></div>
                                 <div class="flex items-center mt-2"><input id="y-axis-auto-__ID__" type="checkbox" checked class="y-axis-auto h-4 w-4 rounded border-gray-300"><label for="y-axis-auto-__ID__" class="ml-2 text-gray-900">Eixo Y Automático</label></div>
                                 <input type="number" placeholder="Ex: 100" class="y-axis-max mt-1 block w-full rounded-md border-gray-300 text-xs" disabled>
                             </div>
-                           <div class="divider"></div>
+                            <div class="divider"></div>
                            <div>
-                               <h3 class="font-bold text-gray-700 mb-2">5. Ações</h3>
-                               <button class="download-chart-btn w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
+                                <h3 class="font-bold text-gray-700 mb-2">5. Ações</h3>
+                                <button class="download-chart-btn w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
                            </div>
-                       </div>
-                 </div>
+                        </div>
+                   </div>
              </div>
         </section>
     </template>
@@ -1074,7 +1117,7 @@ Function Get-HtmlTemplate {
             <div class="flex justify-between items-center"><h3 class="text-lg font-medium">Filtrar Dados</h3><button class="modal-close font-bold text-xl">&times;</button></div>
             <div class="mt-4 space-y-4">
                 <div><label class="block text-sm font-medium">Coluna</label><select id="filter-column" class="mt-1 w-full border-gray-300 rounded-md"></select></div>
-                <div><label class="block text-sm font-medium">Condição</label><select id="filter-condition" class="mt-1 w-full border-gray-300 rounded-md"><option value="=">Igual a</option><option value="!=">Diferente de</option><option value=">">Maior que</option><option value="<">Menor que</option><option value=">=">Maior ou Igual</option><option value="<=">Menor ou Igual</option><option value="contains">Contém</option><option value="not_contains">Não Contém</option></select></div>
+                <div><label class="block text-sm font-medium">Condição</label><select id="filter-condition" class="mt-1 w-full border-gray-300 rounded-md"><option value="equals">Igual a</option><option value="not_equals">Diferente de</option><option value=">">Maior que</option><option value="<">Menor que</option><option value=">=">Maior ou Igual</option><option value="<=">Menor ou Igual</option><option value="contains">Contém</option><option value="not_contains">Não Contém</option></select></div>
                 <div><label class="block text-sm font-medium">Valor</label><input type="text" id="filter-value" class="mt-1 w-full border-gray-300 rounded-md"></div>
             </div>
             <div class="mt-6 flex justify-end"><button id="apply-filter-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Aplicar Filtro</button></div>
