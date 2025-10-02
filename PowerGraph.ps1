@@ -1,18 +1,18 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 6.6.2 - Lógica de Delimitador Aprimorada
+# Versão: 6.7.0 - Integração de Melhorias da Comunidade
 # Autor: jefferson/configexe
 #
-# Melhorias da Versão 6.6.2:
-# - INTEGRAÇÃO: Incorporada a lógica de detecção de delimitador com if/elseif
-#   sugerida pelo usuário, que é mais clara, robusta e corrige o bug de
-#   "chaves duplicadas". Excelente trabalho!
-# - COMPATIBILIDADE: Adicionado -Encoding Default ao Import-Csv para melhor
-#   compatibilidade com arquivos gerados por diferentes programas.
+# Melhorias da Versão 6.7.0 (com base em sua análise):
+# - CORREÇÃO (SQL): Implementada nova função formatSql que usa String.fromCharCode(96)
+#   para evitar problemas de escape de caracteres, consertando o motor SQL.
+# - NOVO RECURSO (UI): Adicionado botão para esconder/mostrar a lista de gráficos na navegação.
+# - NOVO RECURSO (GRÁFICOS): Adicionada a capacidade de renomear e ocultar os eixos X e Y.
+# - NOVO RECURSO (GRÁFICOS): Nova opção de agregação "% do Grupo" para análises percentuais
+#   mais detalhadas.
 # -----------------------------------------------------------------------------
 
 # --- 1. Configurações Iniciais e de Encoding ---
-# Garante que todo o script opere em UTF-8 para compatibilidade de caracteres
 $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -28,7 +28,6 @@ catch {
 
 # --- 3. Funções Principais ---
 
-# Função para fornecer URLs de CDN.
 Function Get-CdnLibraryTags {
     $libs = @(
         '<script src="https://cdn.tailwindcss.com"></script>',
@@ -40,7 +39,6 @@ Function Get-CdnLibraryTags {
 }
 
 
-# Função que contém o template HTML, CSS e JavaScript da aplicação completa.
 Function Get-HtmlTemplate {
     param(
         [Parameter(Mandatory=$true)]$JsonData,
@@ -49,7 +47,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v6.6.0)
+    // Power-Graphx Web App - Lógica Principal (v6.7.0)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -62,9 +60,8 @@ Function Get-HtmlTemplate {
     const sortState = {};
     let isEditMode = false;
     let conditionalFormattingRules = [];
-    let chartObservers = {}; // Para gerenciar os observers de cada gráfico
+    let chartObservers = {};
 
-    // Função Debounce para performance
     function debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
@@ -77,7 +74,6 @@ Function Get-HtmlTemplate {
         };
     }
 
-    // Ponto de entrada
     window.onload = () => {
         try {
             Chart.register(ChartDataLabels);
@@ -210,14 +206,16 @@ Function Get-HtmlTemplate {
         let query = editor.value;
         
         query = query.replace(/;(\s*DROP|\s*DELETE|\s*UPDATE)/gi, '; /* COMANDO BLOQUEADO */ $1');
-
-        const keywords = new Set(['SELECT', 'FROM', 'WHERE', 'GROUP', 'BY', 'ORDER', 'AS', 'ON', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'JOIN', 'LIMIT', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'IS', 'NULL', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DISTINCT']);
+        
+        const keywords = new Set(['SELECT', 'FROM', 'WHERE', 'GROUP', 'BY', 'ORDER', 'AS', 'ON', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'JOIN', 'LIMIT', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'IS', 'NULL', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DISTINCT', 'CREATE', 'TABLE', 'INSERT', 'INTO', 'VALUES']);
+        
+        query = query.replace(/`/g, '');
         
         query = query.replace(/(?<![`'"])\b([a-zA-Z_][\w]*)\b(?![`'"])/g, (match, word) => {
             if (keywords.has(word.toUpperCase()) || !isNaN(word)) {
                 return word;
             }
-            return `\`${word}\``;
+            return String.fromCharCode(96) + word + String.fromCharCode(96);
         });
         
         editor.value = query;
@@ -634,7 +632,7 @@ Function Get-HtmlTemplate {
         newSeries.innerHTML = `
             <div><label class="text-xs font-semibold">Eixo X / Categoria:</label><select name="x-axis" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
             <div class="y-axis-start-control" style="display: none;"><label class="text-xs font-semibold">Valor Inicial:</label><select name="y-axis-start" class="mt-1 block w-full rounded-md border-gray-300 text-sm"></select></div>
-            <div><label class="text-xs font-semibold y-axis-label">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option><option value="percentage_total">% do Total</option><option value="none">Nenhum</option></select></div></div>
+            <div><label class="text-xs font-semibold y-axis-label">Eixo Y / Valor:</label><div class="flex space-x-1"><select name="y-axis" class="mt-1 block w-2/3 rounded-md border-gray-300 text-sm"></select><select name="aggregation" class="mt-1 block w-1/3 rounded-md border-gray-300 text-sm"><option value="sum">Soma</option><option value="avg">Média</option><option value="count">Contagem</option><option value="min">Mínimo</option><option value="max">Máximo</option><option value="percentage_total">% do Total</option><option value="percentage_group">% do Grupo</option><option value="none">Nenhum</option></select></div></div>
             <div class="sm:col-span-2"><label class="text-xs font-semibold">Nome da Série (Legenda):</label><input type="text" name="series-label" class="mt-1 block w-full rounded-md border-gray-300 text-sm" placeholder="Opcional"></div>
             <div class="combo-type-control" style="display: none;"><label class="text-xs font-semibold">Tipo:</label><select name="series-type" class="mt-1 block w-full rounded-md border-gray-300 text-sm"><option value="bar">Barra</option><option value="line">Linha</option></select></div>
             <div class="secondary-axis-control" style="display: none;"><label class="flex items-center text-xs font-semibold"><input type="checkbox" name="secondary-axis" class="h-4 w-4 mr-2 rounded border-gray-300">Usar Eixo Secundário</label></div>
@@ -735,9 +733,13 @@ Function Get-HtmlTemplate {
 
              uniqueGroups.forEach((groupValue, index) => {
                  const groupFilteredData = chartData.filter(d => d[groupingColumn] == groupValue);
+                 const groupTotal = (agg === 'percentage_group') 
+                    ? groupFilteredData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0).reduce((a, b) => a + b, 0)
+                    : 1;
+
                  const data = labels.map(label => {
                      const groupDataForLabel = groupFilteredData.filter(d => d[xCol] == label);
-                     return calculateAggregation(groupDataForLabel, yCol, agg, totalForPercent);
+                     return calculateAggregation(groupDataForLabel, yCol, agg, totalForPercent, groupTotal);
                  });
                  const color = colorPalette[index % colorPalette.length];
                  datasets.push({ label: groupValue, data, borderColor: color, backgroundColor: color + 'B3', type: seriesTypeOption, yAxisID: useSecondaryAxis ? 'y1' : 'y', stack: chartType === 'groupedStackedBar' ? xCol : undefined });
@@ -807,7 +809,7 @@ Function Get-HtmlTemplate {
         chartInstances[id] = new Chart(canvas, { type: 'bar', data: { labels, datasets }, options });
     }
 
-    function calculateAggregation(data, column, aggType, totalForPercent = 1) {
+    function calculateAggregation(data, column, aggType, totalForPercent = 1, groupTotal = 1) {
         if (data.length === 0) return 0;
         const numericValues = data.map(r => parseFloat(String(r[column] || '0').replace(',', '.')) || 0).filter(v => !isNaN(v));
 
@@ -821,16 +823,25 @@ Function Get-HtmlTemplate {
             case 'percentage_total':
                 const sum = numericValues.reduce((a, b) => a + b, 0);
                 return totalForPercent > 0 ? (sum / totalForPercent) * 100 : 0;
+            case 'percentage_group':
+                const sumGroup = numericValues.reduce((a, b) => a + b, 0);
+                return groupTotal > 0 ? (sumGroup / groupTotal) * 100 : 0;
             default: return 0;
         }
     }
 
     function buildChartOptions(section, datasets) {
         const chartSubtitle = section.querySelector('.chart-subtitle-input').value;
-        const yAxisAuto = section.querySelector('.y-axis-auto').checked, yAxisMax = parseFloat(section.querySelector('.y-axis-max').value);
+        const yAxisAuto = section.querySelector('.y-axis-auto').checked;
+        const yAxisMax = parseFloat(section.querySelector('.y-axis-max').value);
         const labelPos = section.querySelector('.label-position').value;
         const gridColor = section.querySelector('.show-grid').checked ? 'rgba(0, 0, 0, 0.1)' : 'transparent';
         const fontColor = '#64748B';
+        
+        const xAxisLabel = section.querySelector('.x-axis-label').value;
+        const yAxisLabel = section.querySelector('.y-axis-label-main').value;
+        const showXAxis = section.querySelector('.show-x-axis').checked;
+        const showYAxis = section.querySelector('.show-y-axis').checked;
 
         datasets.forEach(ds => {
             ds.pointStyle = section.querySelector('.point-style').value;
@@ -848,7 +859,7 @@ Function Get-HtmlTemplate {
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) { label += ': '; }
-                            const isPercent = label.includes('% do Total');
+                            const isPercent = label.includes('% do');
                             let value;
                             if (context.dataset.data[context.dataIndex] && Array.isArray(context.dataset.data[context.dataIndex])) {
                                 value = `[${context.dataset.data[context.dataIndex].join(', ')}]`;
@@ -875,20 +886,42 @@ Function Get-HtmlTemplate {
                     align: labelPos, anchor: labelPos === 'center' ? 'center' : (labelPos === 'start' ? 'start' : 'end'),
                     formatter: (value, ctx) => {
                         if (Array.isArray(value)) return null;
-                        const isPercent = ctx.dataset.label.includes('% do Total');
+                        const isPercent = ctx.dataset.label.includes('% do');
                         let formattedVal = typeof value === 'number' ? value.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) : value;
                         return isPercent ? formattedVal + '%' : formattedVal;
                     }
                 }
             },
             scales: {
-                y: { beginAtZero: true, type: 'linear', position: 'left', max: yAxisAuto ? undefined : yAxisMax, grid: { color: gridColor }, ticks: { color: fontColor } },
-                x: { grid: { color: gridColor }, ticks: { color: fontColor } }
+                y: { 
+                    display: showYAxis,
+                    beginAtZero: true, 
+                    type: 'linear', 
+                    position: 'left', 
+                    max: yAxisAuto ? undefined : yAxisMax, 
+                    grid: { color: gridColor }, 
+                    ticks: { color: fontColor },
+                    title: { display: !!yAxisLabel, text: yAxisLabel, color: fontColor }
+                },
+                x: { 
+                    display: showXAxis,
+                    grid: { color: gridColor }, 
+                    ticks: { color: fontColor },
+                    title: { display: !!xAxisLabel, text: xAxisLabel, color: fontColor }
+                }
             }
         };
 
         if (datasets.some(ds => ds.yAxisID === 'y1')) {
-            options.scales.y1 = { type: 'linear', position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: fontColor } };
+            options.scales.y1 = { 
+                display: showYAxis,
+                type: 'linear', 
+                position: 'right', 
+                beginAtZero: true, 
+                grid: { drawOnChartArea: false }, 
+                ticks: { color: fontColor },
+                title: { display: !!yAxisLabel, text: yAxisLabel ? `${yAxisLabel} (2º)` : '', color: fontColor }
+            };
         }
         return options;
     }
@@ -985,7 +1018,7 @@ Function Get-HtmlTemplate {
     
     function saveState() {
         const state = {
-            version: '6.6.0',
+            version: '6.7.0',
             alasqlTables: {},
             conditionalFormatting: conditionalFormattingRules,
             sqlEditorContent: document.getElementById('sql-editor').value,
@@ -1009,6 +1042,10 @@ Function Get-HtmlTemplate {
                 labelPosition: section.querySelector('.label-position').value,
                 labelSize: section.querySelector('.label-size').value,
                 showGrid: section.querySelector('.show-grid').checked,
+                xAxisLabel: section.querySelector('.x-axis-label').value,
+                yAxisLabel: section.querySelector('.y-axis-label-main').value,
+                showXAxis: section.querySelector('.show-x-axis').checked,
+                showYAxis: section.querySelector('.show-y-axis').checked,
                 yAxisAuto: section.querySelector('.y-axis-auto').checked,
                 yAxisMax: section.querySelector('.y-axis-max').value,
                 barBorderRadius: section.querySelector('.bar-border-radius').value,
@@ -1092,6 +1129,10 @@ Function Get-HtmlTemplate {
         section.querySelector('.label-position').value = config.labelPosition;
         section.querySelector('.label-size').value = config.labelSize;
         section.querySelector('.show-grid').checked = config.showGrid;
+        section.querySelector('.x-axis-label').value = config.xAxisLabel;
+        section.querySelector('.y-axis-label-main').value = config.yAxisLabel;
+        section.querySelector('.show-x-axis').checked = config.showXAxis;
+        section.querySelector('.show-y-axis').checked = config.showYAxis;
         section.querySelector('.y-axis-auto').checked = config.yAxisAuto;
         section.querySelector('.y-axis-max').value = config.yAxisMax;
         section.querySelector('.y-axis-max').disabled = config.yAxisAuto;
@@ -1132,6 +1173,20 @@ Function Get-HtmlTemplate {
         }
         
         nav.classList.remove('hidden');
+        
+        const header = nav.querySelector('h4');
+        if (!header.querySelector('.toggle-nav-btn')) {
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'toggle-nav-btn ml-2 text-gray-500 hover:text-gray-800 focus:outline-none';
+            toggleBtn.innerHTML = '&#x25BC;'; // Seta para baixo
+            toggleBtn.onclick = () => {
+                const ul = nav.querySelector('ul');
+                ul.classList.toggle('hidden');
+                toggleBtn.innerHTML = ul.classList.contains('hidden') ? '&#x25B6;' : '&#x25BC;';
+            };
+            header.appendChild(toggleBtn);
+        }
+
         sections.forEach(section => {
             const id = section.dataset.id;
             const title = section.querySelector('.chart-title-input-main').value || `Análise ${id}`;
@@ -1172,7 +1227,7 @@ Function Get-HtmlTemplate {
     <input type="file" id="csv-update-input" accept=".csv" class="hidden">
 
     <nav id="chart-nav" class="hidden fixed top-1/4 left-4 bg-white/80 backdrop-blur-sm shadow-lg rounded-lg p-2 w-48 z-20">
-        <h4 class="font-bold text-sm text-gray-800 mb-2 px-2">Gráficos</h4>
+        <h4 class="font-bold text-sm text-gray-800 mb-2 px-2 flex justify-between items-center">Gráficos</h4>
         <ul class="space-y-1"></ul>
     </nav>
 
@@ -1287,8 +1342,14 @@ Function Get-HtmlTemplate {
                             </div>
                             <div class="divider"></div>
                             <div><span class="font-semibold text-gray-700">Eixos e Grade</span>
-                                <div class="flex items-center mt-2"><input id="show-grid-__ID__" type="checkbox" checked class="show-grid h-4 w-4 rounded border-gray-300"><label for="show-grid-__ID__" class="ml-2 text-gray-900">Exibir grades</label></div>
-                                <div class="flex items-center mt-2"><input id="y-axis-auto-__ID__" type="checkbox" checked class="y-axis-auto h-4 w-4 rounded border-gray-300"><label for="y-axis-auto-__ID__" class="ml-2 text-gray-900">Eixo Y Automático</label></div>
+                                <div class="mt-2 space-y-2">
+                                    <div><label class="text-xs text-gray-600">Nome Eixo X:</label><input type="text" placeholder="Padrão" class="x-axis-label mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                                    <div><label class="text-xs text-gray-600">Nome Eixo Y:</label><input type="text" placeholder="Padrão" class="y-axis-label-main mt-1 block w-full rounded-md border-gray-300 text-xs"></div>
+                                </div>
+                                <div class="flex items-center mt-2"><input id="show-x-axis-__ID__" type="checkbox" checked class="show-x-axis h-4 w-4 rounded border-gray-300"><label for="show-x-axis-__ID__" class="ml-2 text-sm text-gray-900">Exibir eixo X</label></div>
+                                <div class="flex items-center mt-2"><input id="show-y-axis-__ID__" type="checkbox" checked class="show-y-axis h-4 w-4 rounded border-gray-300"><label for="show-y-axis-__ID__" class="ml-2 text-sm text-gray-900">Exibir eixo Y</label></div>
+                                <div class="flex items-center mt-2"><input id="show-grid-__ID__" type="checkbox" checked class="show-grid h-4 w-4 rounded border-gray-300"><label for="show-grid-__ID__" class="ml-2 text-sm text-gray-900">Exibir grades</label></div>
+                                <div class="flex items-center mt-2"><input id="y-axis-auto-__ID__" type="checkbox" checked class="y-axis-auto h-4 w-4 rounded border-gray-300"><label for="y-axis-auto-__ID__" class="ml-2 text-sm text-gray-900">Eixo Y Automático</label></div>
                                 <input type="number" placeholder="Ex: 100" class="y-axis-max mt-1 block w-full rounded-md border-gray-300 text-xs" disabled>
                             </div>
                             <div class="divider"></div>
@@ -1367,6 +1428,7 @@ Function Get-HtmlTemplate {
 </html>
 '@
 
+    # Substitui os placeholders de forma segura, escapando os {} para o operador -replace do PowerShell
     $template = $template -replace '\{\{CDN_TAGS\}\}', $CdnLibraryTags
     $template = $template -replace '\{\{JSON_DATA\}\}', $JsonData
     $template = $template -replace '\{\{JS_CODE\}\}', $ApplicationJavaScript
@@ -1392,7 +1454,7 @@ Function Start-WebApp {
         try {
             $firstLine = Get-Content -Path $FilePath -TotalCount 1 -Encoding Default
             
-            # CORREÇÃO: Lógica de detecção de delimitador com if/elseif (sugerida por você!)
+            # LÓGICA APRIMORADA (SUA SUGESTÃO) - Evita erro de chave duplicada
             $semicolonCount = ([regex]::Matches($firstLine, ';')).Count
             $commaCount = ([regex]::Matches($firstLine, ',')).Count
             $tabCount = ([regex]::Matches($firstLine, "`t")).Count
@@ -1407,6 +1469,7 @@ Function Start-WebApp {
             
             Write-Host "Delimitador detectado: '$bestDelimiter' (';': $semicolonCount | ',': $commaCount | TAB: $tabCount)" -ForegroundColor Yellow
             
+            # Usando -Encoding Default para maior compatibilidade com Excel
             $Data = Import-Csv -Path $FilePath -Delimiter $bestDelimiter -Encoding Default
             if ($null -eq $Data -or $Data.Count -eq 0) { throw "O arquivo CSV está vazio ou em um formato inválido." }
             
