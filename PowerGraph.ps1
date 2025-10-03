@@ -1,15 +1,13 @@
 # -----------------------------------------------------------------------------
 # Power-Graphx Web App Launcher
-# Versão: 6.7.0 - Integração de Melhorias da Comunidade
+# Versão: 6.8.2 - Correção de Sincronia HTML/JS (Pente Fino)
 # Autor: jefferson/configexe
 #
-# Melhorias da Versão 6.7.0 (com base em sua análise):
-# - CORREÇÃO (SQL): Implementada nova função formatSql que usa String.fromCharCode(96)
-#   para evitar problemas de escape de caracteres, consertando o motor SQL.
-# - NOVO RECURSO (UI): Adicionado botão para esconder/mostrar a lista de gráficos na navegação.
-# - NOVO RECURSO (GRÁFICOS): Adicionada a capacidade de renomear e ocultar os eixos X e Y.
-# - NOVO RECURSO (GRÁFICOS): Nova opção de agregação "% do Grupo" para análises percentuais
-#   mais detalhadas.
+# CORREÇÕES E MELHORIAS v6.8.2:
+# - CRÍTICO: Recriado o cabeçalho HTML para incluir TODOS os botões necessários,
+#   resolvendo o erro "Cannot read properties of null (reading 'addEventListener')"
+#   na inicialização.
+# - UI: Botões do cabeçalho reorganizados em grupos lógicos para melhor usabilidade.
 # -----------------------------------------------------------------------------
 
 # --- 1. Configurações Iniciais e de Encoding ---
@@ -31,9 +29,10 @@ catch {
 Function Get-CdnLibraryTags {
     $libs = @(
         '<script src="https://cdn.tailwindcss.com"></script>',
-        '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js" integrity="sha384-e6cc9LaIG7xZ3XD5B+jtr1NhTWPQGQdRCh6xiZ+ZFUtWCpg4ycv3Sh+SkZoopvUY" crossorigin="anonymous"></script>',
-        '<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js" integrity="sha384-y49Zu59jZHJL/PLKgZPv3k2WI9c0Yp3pWB76V8OBVCb0QBKS8l4Ff3YslzHVX76Y" crossorigin="anonymous"></script>',
-        '<script src="https://cdn.jsdelivr.net/npm/alasql@4.1.2/dist/alasql.min.js" integrity="sha384-jJv67p3ipYhUXBEyC6HHwcdBifwMunNP2pOiuY2/6Hme7elFehskJ7cT2tfsKhJC" crossorigin="anonymous"></script>'
+        '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js" crossorigin="anonymous"></script>',
+        '<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js" crossorigin="anonymous"></script>',
+        '<script src="https://cdn.jsdelivr.net/npm/alasql@4.1.2/dist/alasql.min.js" crossorigin="anonymous"></script>',
+        '<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js" crossorigin="anonymous"></script>'
     )
     return $libs -join "`n    "
 }
@@ -47,7 +46,7 @@ Function Get-HtmlTemplate {
     
     $ApplicationJavaScript = @'
     // ---------------------------------------------------
-    // Power-Graphx Web App - Lógica Principal (v6.7.0)
+    // Power-Graphx Web App - Lógica Principal (v6.8.2)
     // ---------------------------------------------------
     
     // Variáveis globais
@@ -116,7 +115,7 @@ Function Get-HtmlTemplate {
     function initializeDB() {
         alasql.tables[initialTableName] = { data: JSON.parse(JSON.stringify(originalData)) };
         updateTableListUI();
-        document.getElementById('sql-status').textContent = 'Motor SQL (AlaSQL) pronto.';
+        document.getElementById('sql-status').textContent = 'Motor SQL pronto.';
     }
     
     function updateTableListUI() {
@@ -197,31 +196,27 @@ Function Get-HtmlTemplate {
         } catch (e) {
             statusEl.textContent = `Erro na consulta SQL: ${e.message}`;
             console.error(e);
-            alert(`Erro na consulta SQL: ${e.message}\n\nDica: Verifique se os nomes das colunas estão entre crases (\`Nome da Coluna\`). Use o botão "Formatar SQL" para ajudar.`);
+            alert(`Erro na consulta SQL: ${e.message}\n\nDica: Use crases em colunas com espaço: SELECT \`nome da coluna\` FROM tabela`);
         }
     }
 
     function formatSql() {
         const editor = document.getElementById('sql-editor');
         let query = editor.value;
-        
         query = query.replace(/;(\s*DROP|\s*DELETE|\s*UPDATE)/gi, '; /* COMANDO BLOQUEADO */ $1');
-        
         const keywords = new Set(['SELECT', 'FROM', 'WHERE', 'GROUP', 'BY', 'ORDER', 'AS', 'ON', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'JOIN', 'LIMIT', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'IS', 'NULL', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DISTINCT', 'CREATE', 'TABLE', 'INSERT', 'INTO', 'VALUES']);
-        
         query = query.replace(/`/g, '');
-        
-        query = query.replace(/(?<![`'"])\b([a-zA-Z_][\w]*)\b(?![`'"])/g, (match, word) => {
-            if (keywords.has(word.toUpperCase()) || !isNaN(word)) {
-                return word;
-            }
-            return String.fromCharCode(96) + word + String.fromCharCode(96);
+        query = query.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match) => {
+            return keywords.has(match.toUpperCase()) || !isNaN(match) ? match : '`' + match + '`';
         });
-        
+        query = query.replace(/'`([^']+)`'/g, "'$1'");
+        query = query.replace(/"`([^"]+)`"/g, '"$1"');
         editor.value = query;
     }
     
     function setupEventListeners() {
+        document.getElementById('btn-transpose').addEventListener('click', transposeData);
+        document.getElementById('btn-export-all-pptx').addEventListener('click', exportAllChartsToPPTX);
         document.getElementById('btn-filter').addEventListener('click', () => {
             updateModalColumnSelector('filter-column');
             document.getElementById('filter-modal').classList.remove('hidden');
@@ -262,6 +257,34 @@ Function Get-HtmlTemplate {
         document.getElementById('btn-add-chart').addEventListener('click', addChartAnalysis);
     }
     
+    function transposeData() {
+        if (!currentData.length) {
+            alert("Nenhum dado para transpor.");
+            return;
+        }
+
+        const cols = Object.keys(currentData[0]);
+        const firstCol = cols[0];
+        const newData = cols.slice(1).map(colName => {
+            const newRow = { [firstCol]: colName };
+            currentData.forEach(row => {
+                newRow[row[firstCol]] = row[colName];
+            });
+            return newRow;
+        });
+
+        if (newData.length === 0) {
+            alert("Não foi possível transpor. Verifique a estrutura dos dados.");
+            return;
+        }
+
+        currentData = newData;
+        updateColumnStructure(Object.keys(newData[0]).map(n => ({originalName: n, displayName: n})));
+        renderTable();
+        updateStatus();
+        document.querySelectorAll('.chart-analysis-section').forEach(s => renderChart(s.dataset.id));
+    }
+
     function handleDataSourceUpdate(event) {
         const file = event.target.files[0];
         if (!file) return;
@@ -587,6 +610,27 @@ Function Get-HtmlTemplate {
                 debouncedRenderChart(id);
             }
         });
+        
+        section.querySelector('.enable-drag').addEventListener('change', (e) => {
+            const canvas = section.querySelector('canvas');
+            const badge = section.querySelector('.chart-interactive-badge');
+            
+            const newCanvas = canvas.cloneNode(true);
+            canvas.parentNode.replaceChild(newCanvas, canvas);
+            renderChart(id); // Re-renderiza para limpar listeners antigos e aplicar estado
+
+            if (e.target.checked) {
+                makeChartInteractive(id);
+                if (!badge) {
+                    const badgeEl = document.createElement('div');
+                    badgeEl.className = 'chart-interactive-badge';
+                    badgeEl.textContent = 'INTERATIVO';
+                    section.querySelector('.relative').appendChild(badgeEl);
+                }
+            } else {
+                if (badge) badge.remove();
+            }
+        });
 
         section.querySelector('.add-series-btn').addEventListener('click', () => addSeriesControl(id));
         section.querySelector('.download-chart-btn').addEventListener('click', () => downloadChart(id));
@@ -728,18 +772,23 @@ Function Get-HtmlTemplate {
 
              let totalForPercent = 1;
              if (agg === 'percentage_total') {
-                 totalForPercent = chartData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0).reduce((a, b) => a + b, 0);
+                 totalForPercent = chartData.reduce((sum, r) => sum + (parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0), 0);
              }
 
              uniqueGroups.forEach((groupValue, index) => {
                  const groupFilteredData = chartData.filter(d => d[groupingColumn] == groupValue);
-                 const groupTotal = (agg === 'percentage_group') 
-                    ? groupFilteredData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0).reduce((a, b) => a + b, 0)
-                    : 1;
-
+                 
                  const data = labels.map(label => {
                      const groupDataForLabel = groupFilteredData.filter(d => d[xCol] == label);
-                     return calculateAggregation(groupDataForLabel, yCol, agg, totalForPercent, groupTotal);
+                     
+                     let categoryTotal = 1;
+                     if (agg === 'percentage_group') {
+                         categoryTotal = uniqueGroups.reduce((sum, grp) => {
+                             const grpData = chartData.filter(d => d[groupingColumn] == grp && d[xCol] == label);
+                             return sum + grpData.reduce((s, r) => s + (parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0), 0);
+                         }, 0);
+                     }
+                     return calculateAggregation(groupDataForLabel, yCol, agg, totalForPercent, categoryTotal);
                  });
                  const color = colorPalette[index % colorPalette.length];
                  datasets.push({ label: groupValue, data, borderColor: color, backgroundColor: color + 'B3', type: seriesTypeOption, yAxisID: useSecondaryAxis ? 'y1' : 'y', stack: chartType === 'groupedStackedBar' ? xCol : undefined });
@@ -756,7 +805,7 @@ Function Get-HtmlTemplate {
 
                  let totalForPercent = 1;
                  if (agg === 'percentage_total') {
-                     totalForPercent = chartData.map(r => parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0).reduce((a, b) => a + b, 0);
+                     totalForPercent = chartData.reduce((sum, r) => sum + (parseFloat(String(r[yCol] || '0').replace(',', '.')) || 0), 0);
                  }
                  
                  const data = labels.map(label => {
@@ -812,14 +861,15 @@ Function Get-HtmlTemplate {
     function calculateAggregation(data, column, aggType, totalForPercent = 1, groupTotal = 1) {
         if (data.length === 0) return 0;
         const numericValues = data.map(r => parseFloat(String(r[column] || '0').replace(',', '.')) || 0).filter(v => !isNaN(v));
+        if (numericValues.length === 0) return 0;
 
         switch(aggType) {
             case 'count': return data.length;
-            case 'none': return numericValues.length > 0 ? numericValues[0] : 0;
+            case 'none': return numericValues[0];
             case 'sum': return numericValues.reduce((a, b) => a + b, 0);
-            case 'avg': return numericValues.length > 0 ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length : 0;
-            case 'min': return numericValues.length > 0 ? Math.min(...numericValues) : 0;
-            case 'max': return numericValues.length > 0 ? Math.max(...numericValues) : 0;
+            case 'avg': return numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+            case 'min': return Math.min(...numericValues);
+            case 'max': return Math.max(...numericValues);
             case 'percentage_total':
                 const sum = numericValues.reduce((a, b) => a + b, 0);
                 return totalForPercent > 0 ? (sum / totalForPercent) * 100 : 0;
@@ -859,7 +909,7 @@ Function Get-HtmlTemplate {
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) { label += ': '; }
-                            const isPercent = label.includes('% do');
+                            const isPercent = context.dataset.label.includes('% do');
                             let value;
                             if (context.dataset.data[context.dataIndex] && Array.isArray(context.dataset.data[context.dataIndex])) {
                                 value = `[${context.dataset.data[context.dataIndex].join(', ')}]`;
@@ -925,7 +975,177 @@ Function Get-HtmlTemplate {
         }
         return options;
     }
+
+    function downloadChart(id) {
+        const modalHTML = `
+            <div id="download-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 z-50 flex items-center justify-center">
+                <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm text-center">
+                    <h3 class="text-xl font-bold mb-4 text-gray-800">Exportar Gráfico</h3>
+                    <div class="space-y-3">
+                        <button onclick="downloadChartAsPNG(${id})" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors">
+                            PNG Alta Resolução (3x)
+                        </button>
+                        <button onclick="downloadChartAsPPTX(${id})" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg transition-colors">
+                            PowerPoint (.pptx)
+                        </button>
+                        <button onclick="document.getElementById('download-modal').remove()" class="w-full mt-4 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-lg transition-colors">
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+    }
+
+    function downloadChartAsPNG(id) {
+        const chart = chartInstances[id];
+        const canvas = chart.canvas;
+        const tempCanvas = document.createElement('canvas');
+        const scale = 3;
+        
+        tempCanvas.width = canvas.width * scale;
+        tempCanvas.height = canvas.height * scale;
+        
+        const ctx = tempCanvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        
+        ctx.scale(scale, scale);
+        ctx.drawImage(canvas, 0, 0);
+        
+        const link = document.createElement('a');
+        link.href = tempCanvas.toDataURL('image/png', 1.0);
+        link.download = `power-graphx-chart-${id}-HD.png`;
+        link.click();
+        document.getElementById('download-modal').remove();
+    }
+
+    function downloadChartAsPPTX(id) {
+        const chart = chartInstances[id];
+        const section = document.getElementById(`chart-section-${id}`);
+        const title = section.querySelector('.chart-title-input-main').value;
+        if (typeof PptxGenJS === 'undefined') {
+            alert('Biblioteca PptxGenJS não foi carregada. Verifique a conexão com a internet e recarregue a página.');
+            return;
+        }
+        try {
+            const pptx = new PptxGenJS();
+            pptx.author = 'Power-Graphx BI';
+            pptx.title = title;
+            const slide = pptx.addSlide();
+            slide.addText(title, { x: 0.5, y: 0.3, w: 9, h: 0.5, fontSize: 24, bold: true, color: '1F2937' });
+            slide.addImage({ data: chart.toBase64Image(), x: 1, y: 1.2, w: 8, h: 5, sizing: { type: 'contain' } });
+            slide.addText(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, { x: 0.5, y: 6.8, w: 9, h: 0.3, fontSize: 10, color: '6B7280', align: 'center' });
+            pptx.writeFile({ fileName: `power-graphx-${title.replace(/[^a-z0-9]/gi, '_')}.pptx` });
+            document.getElementById('download-modal').remove();
+        } catch (e) {
+            alert(`Ocorreu um erro ao gerar o arquivo PPTX: ${e.message}`);
+        }
+    }
+
+    function exportAllChartsToPPTX() {
+        const sections = document.querySelectorAll('.chart-analysis-section');
+        if (!sections.length) {
+            alert('Nenhum gráfico para exportar.');
+            return;
+        }
+        if (typeof PptxGenJS === 'undefined') {
+            alert('Biblioteca PptxGenJS não foi carregada.');
+            return;
+        }
+        try {
+            const pptx = new PptxGenJS();
+            pptx.layout = 'LAYOUT_WIDE';
+            sections.forEach((section, index) => {
+                const id = section.dataset.id;
+                const chart = chartInstances[id];
+                if (!chart) return;
+                const title = section.querySelector('.chart-title-input-main').value;
+                const slide = pptx.addSlide();
+                slide.addText(title, { x: 0.5, y: 0.3, w: 12, h: 0.5, fontSize: 28, bold: true });
+                slide.addImage({ data: chart.toBase64Image(), x: 0.5, y: 1, w: 12, h: 5.5, sizing: { type: 'contain' } });
+                slide.addText(`Slide ${index + 1} de ${sections.length}`, { x: 12.3, y: 6.8, w: 0.8, h: 0.3, fontSize: 10, align: 'right' });
+            });
+            pptx.writeFile({ fileName: `power-graphx-apresentacao-${Date.now()}.pptx` });
+            alert(`Apresentação com ${sections.length} gráficos gerada com sucesso!`);
+        } catch (e) {
+            alert(`Erro ao gerar apresentação: ${e.message}`);
+        }
+    }
     
+    function makeChartInteractive(chartId) {
+        const chart = chartInstances[chartId];
+        if (!chart) return;
+        const canvas = chart.canvas;
+        let isDragging = false, draggedElement = null;
+
+        const getEventCoordinates = (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const source = event.touches ? event.touches[0] : event;
+            return { x: source.clientX - rect.left, y: source.clientY - rect.top };
+        };
+        
+        const startDrag = (event) => {
+            const elements = chart.getElementsAtEventForMode(event, 'nearest', { intersect: true }, true);
+            if (elements.length > 0) {
+                isDragging = true;
+                draggedElement = elements[0];
+                canvas.style.cursor = 'grabbing';
+            }
+        };
+
+        const drag = (event) => {
+            if (!isDragging || !draggedElement) return;
+            event.preventDefault();
+            const { y } = getEventCoordinates(event);
+            const yAxis = chart.scales.y;
+            const newValue = Math.max(0, yAxis.getValueForPixel(y));
+            const { datasetIndex, index } = draggedElement;
+            if (chart.data.datasets[datasetIndex]?.data[index] !== undefined) {
+                chart.data.datasets[datasetIndex].data[index] = newValue;
+                chart.update('none');
+            }
+        };
+
+        const stopDrag = () => {
+            if (isDragging) {
+                isDragging = false;
+                draggedElement = null;
+                canvas.style.cursor = 'grab';
+                syncChartDataToTable(chartId, chart);
+            }
+        };
+        
+        canvas.onmousedown = startDrag;
+        canvas.ontouchstart = startDrag;
+        canvas.onmousemove = drag;
+        canvas.ontouchmove = drag;
+        canvas.onmouseup = stopDrag;
+        canvas.ontouchend = stopDrag;
+        canvas.onmouseleave = stopDrag;
+    }
+
+    function syncChartDataToTable(chartId, chart) {
+        const section = document.getElementById(`chart-section-${chartId}`);
+        if (!section) return;
+
+        const xCol = section.querySelector('[name="x-axis"]').value;
+        const yCol = section.querySelector('[name="y-axis"]').value;
+
+        chart.data.labels.forEach((label, idx) => {
+            chart.data.datasets.forEach(dataset => {
+                const newValue = dataset.data[idx];
+                const matchingRow = currentData.find(row => String(row[xCol]) === String(label));
+                if (matchingRow) {
+                    matchingRow[yCol] = newValue;
+                }
+            });
+        });
+        renderTable();
+        console.log(`Gráfico ${chartId} sincronizado com a tabela de dados.`);
+    }
+
     function applyCalculatedColumn() {
         const tableName = document.getElementById('calc-column-table').value;
         const newColumnName = document.getElementById('calc-column-name').value;
@@ -948,51 +1168,6 @@ Function Get-HtmlTemplate {
             alert(`Erro ao aplicar a fórmula: ${e.message}`);
             console.error(e);
         }
-    }
-
-    function downloadChart(id) {
-        const chart = chartInstances[id];
-        if (!chart) { alert('Gere um gráfico para poder baixá-lo.'); return; }
-        const link = document.createElement('a');
-        link.href = chart.toBase64Image('image/png', 1.0);
-        link.download = `power-graphx-chart-${id}.png`;
-        link.click();
-    }
-
-    function applyFilter(closeModal = true) {
-        const column = document.getElementById('filter-column').value;
-        const condition = document.getElementById('filter-condition').value;
-        const value = document.getElementById('filter-value').value;
-        const query = document.getElementById('sql-editor').value;
-
-        if (!column) {
-            runQueryAndUpdateUI();
-        } else {
-             let filterClause = ` WHERE \`${column}\` `;
-             switch (condition) {
-                 case 'contains': filterClause += `LIKE '%${value}%'`; break;
-                 case 'not_contains': filterClause += `NOT LIKE '%${value}%'`; break;
-                 case 'equals': filterClause += `= '${value}'`; break;
-                 case 'not_equals': filterClause += `!= '${value}'`; break;
-                 default:
-                     if (isNaN(value) || value.trim() === '') {
-                         filterClause += `${condition} '${value}'`;
-                     } else {
-                         filterClause += `${condition} ${value}`;
-                     }
-             }
-             try {
-                 const filteredQuery = `SELECT * FROM (${query}) AS subquery${filterClause}`;
-                 currentData = alasql(filteredQuery);
-             } catch(e) {
-                 console.error("Não foi possível aplicar filtro na query atual, aplicando na fonte original.", e);
-                 currentData = alasql(`SELECT * FROM ${initialTableName}${filterClause}`);
-             }
-        }
-        
-        renderTable();
-        updateStatus();
-        if(closeModal) document.getElementById('filter-modal').classList.add('hidden');
     }
 
     function downloadCSV() {
@@ -1018,7 +1193,7 @@ Function Get-HtmlTemplate {
     
     function saveState() {
         const state = {
-            version: '6.7.0',
+            version: '6.8.0',
             alasqlTables: {},
             conditionalFormatting: conditionalFormattingRules,
             sqlEditorContent: document.getElementById('sql-editor').value,
@@ -1177,8 +1352,8 @@ Function Get-HtmlTemplate {
         const header = nav.querySelector('h4');
         if (!header.querySelector('.toggle-nav-btn')) {
             const toggleBtn = document.createElement('button');
-            toggleBtn.className = 'toggle-nav-btn ml-2 text-gray-500 hover:text-gray-800 focus:outline-none';
-            toggleBtn.innerHTML = '&#x25BC;'; // Seta para baixo
+            toggleBtn.className = 'toggle-nav-btn text-gray-500 hover:text-gray-800 focus:outline-none';
+            toggleBtn.innerHTML = '&#x25BC;';
             toggleBtn.onclick = () => {
                 const ul = nav.querySelector('ul');
                 ul.classList.toggle('hidden');
@@ -1218,6 +1393,9 @@ Function Get-HtmlTemplate {
         .chart-title-input-main { background: transparent; border: 1px solid transparent; font-size: 1.5rem; font-weight: bold; color: #1f2937; width: 100%; padding: 2px 5px; border-radius: 4px; transition: all 0.2s ease-in-out; }
         .chart-title-input-main:hover { border: 1px solid #d1d5db; }
         .chart-title-input-main:focus { outline: none; box-shadow: 0 0 0 2px #3b82f6; border-color: #3b82f6; background: white; }
+        canvas:hover { cursor: grab; }
+        canvas.dragging { cursor: grabbing !important; }
+        .chart-interactive-badge { position: absolute; top: 8px; right: 8px; background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: bold; pointer-events: none; }
     </style>
     {{CDN_TAGS}}
 </head>
@@ -1244,6 +1422,8 @@ Function Get-HtmlTemplate {
                     <button id="btn-filter" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">Filtrar</button>
                     <button id="btn-toggle-sql" class="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-md hover:bg-teal-700">Console SQL</button>
                     <button id="btn-add-chart" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">Adicionar Gráfico</button>
+                    <button id="btn-transpose" class="px-4 py-2 text-sm font-medium text-white bg-purple-500 rounded-md hover:bg-purple-600">Transpor Dados ⇄</button>
+                    <button id="btn-export-all-pptx" class="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600">Exportar PPTX</button>
                     <button id="btn-save-state" class="px-4 py-2 text-sm font-medium text-white bg-pink-600 rounded-md hover:bg-pink-700">Salvar Sessão</button>
                     <button id="btn-download-csv" class="px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded-md hover:bg-gray-900">Baixar CSV</button>
                 </div>
@@ -1355,8 +1535,17 @@ Function Get-HtmlTemplate {
                             <div class="divider"></div>
                            <div>
                                 <h3 class="font-bold text-gray-700 mb-2">5. Ações</h3>
-                                <button class="download-chart-btn w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico (PNG)</button>
+                                <button class="download-chart-btn w-full bg-gray-600 text-white font-bold py-2 rounded-lg hover:bg-gray-700 text-sm">Baixar Gráfico</button>
                            </div>
+                           <div class="divider"></div>
+                            <div>
+                                <h3 class="font-bold text-gray-700 mb-2">6. Interatividade</h3>
+                                <label class="flex items-center text-sm">
+                                    <input id="enable-drag-__ID__" type="checkbox" class="enable-drag h-4 w-4 mr-2 rounded border-gray-300">
+                                    Permitir arrastar valores no gráfico
+                                </label>
+                                <p class="text-xs text-gray-500 mt-1">⚠️ Ativa o modo de edição interativa.</p>
+                            </div>
                         </div>
                    </div>
              </div>
@@ -1428,7 +1617,7 @@ Function Get-HtmlTemplate {
 </html>
 '@
 
-    # Substitui os placeholders de forma segura, escapando os {} para o operador -replace do PowerShell
+    # Substitui os placeholders de forma segura
     $template = $template -replace '\{\{CDN_TAGS\}\}', $CdnLibraryTags
     $template = $template -replace '\{\{JSON_DATA\}\}', $JsonData
     $template = $template -replace '\{\{JS_CODE\}\}', $ApplicationJavaScript
@@ -1454,12 +1643,11 @@ Function Start-WebApp {
         try {
             $firstLine = Get-Content -Path $FilePath -TotalCount 1 -Encoding Default
             
-            # LÓGICA APRIMORADA (SUA SUGESTÃO) - Evita erro de chave duplicada
             $semicolonCount = ([regex]::Matches($firstLine, ';')).Count
             $commaCount = ([regex]::Matches($firstLine, ',')).Count
             $tabCount = ([regex]::Matches($firstLine, "`t")).Count
             
-            $bestDelimiter = ','  # Padrão para vírgula
+            $bestDelimiter = ','
             if ($semicolonCount -gt $commaCount -and $semicolonCount -gt $tabCount) {
                 $bestDelimiter = ';'
             }
@@ -1469,7 +1657,6 @@ Function Start-WebApp {
             
             Write-Host "Delimitador detectado: '$bestDelimiter' (';': $semicolonCount | ',': $commaCount | TAB: $tabCount)" -ForegroundColor Yellow
             
-            # Usando -Encoding Default para maior compatibilidade com Excel
             $Data = Import-Csv -Path $FilePath -Delimiter $bestDelimiter -Encoding Default
             if ($null -eq $Data -or $Data.Count -eq 0) { throw "O arquivo CSV está vazio ou em um formato inválido." }
             
